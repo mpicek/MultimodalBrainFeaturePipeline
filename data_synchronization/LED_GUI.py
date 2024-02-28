@@ -53,7 +53,7 @@ class ImageCropper:
         by pressing 'r' and confirm the selection by pressing 'c'.
 
         Returns:
-        tuple: A tuple of (cropped_image, list of reference points defining the selected rectangle).
+        tuple: A tuple of (cropped_image (numpy array), list of reference points defining the selected rectangle).
                If no selection is made, returns None.
         """
         cv2.namedWindow("image")
@@ -82,7 +82,7 @@ class ImageCropper:
 
 if __name__ == "__main__":
     # Example usage
-    image_path = '/home/mpicek/repos/master_project/test_data/camera/C0170T01.JPG'
+    image_path = '/home/mpicek/repos/master_project/test_data/camera/C0359T01.JPG'
     image_array = cv2.imread(image_path)  # Ensure you read the image with OpenCV
     cropper = ImageCropper(image_array)
     roi, ref_point = cropper.show_and_crop_image()
