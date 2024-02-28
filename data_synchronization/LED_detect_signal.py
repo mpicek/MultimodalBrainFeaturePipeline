@@ -71,6 +71,33 @@ def get_LED_mask(video_array, visualize_pipeline=False):
     return dilated_image
 
 def get_LED_signal(video_path, LED_mask, ref_point, n_frames, downscale_factor):
+    """
+    Extracts the LED signal from a video, given an LED mask (for the cropped area)
+    and reference points in the original video (to be cropped).
+
+    This function reads a specified number of frames from a video, crops each frame based on provided
+    reference points, downscales the cropped frame (does not downsample the FPS), 
+    and calculates the average intensity of pixels within the LED mask area.
+
+    Parameters:
+    - video_path (str): Path to the video file.
+    - LED_mask (np.ndarray): A 2D boolean array representing the mask of the LED area. The mask should
+                             have the same dimensions as the downsampled, cropped frame.
+    - ref_point (tuple): A tuple of two tuples, each containing (x, y) coordinates, representing the
+                         top-left and bottom-right corners of the cropping rectangle.
+    - n_frames (int): The number of frames to process from the video.
+    - downscale_factor (int): The factor by which the cropped frame is downsampled. For example, a
+                              downscale_factor of 2 will reduce both the width and height by half.
+
+    Returns:
+    - nd.array: A numpy array of intensity values for the LED area in each processed frame. If the video
+            cannot be opened or there are no selected pixels, None is returned.
+
+    Note:
+    - This function specifically analyzes the red channel of the video frames.
+    - Ensure that the LED_mask dimensions match the dimensions of the downsampled, cropped frame.
+    """
+
     # Ensure the mask is boolean for indexing
     LED_mask = LED_mask.astype(bool)
     
@@ -108,7 +135,7 @@ def get_LED_signal(video_path, LED_mask, ref_point, n_frames, downscale_factor):
 
     cap.release()
     
-    return average_values
+    return np.array(average_values)
 
 def compute_offset(realsense_LED_signal, camera_LED_signal):
     """
