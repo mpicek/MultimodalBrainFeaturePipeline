@@ -44,7 +44,7 @@ class ImageCropper:
 
             # Draw a rectangle around the region of interest
             cv2.rectangle(self.image, self.ref_point[0], self.ref_point[1], (0, 255, 0), 2)
-            cv2.imshow("image", self.image)
+            cv2.imshow("Select area and press 'c' to continue (or 'r' to reset the area)", self.image)
 
     def show_and_crop_image(self):
         """
@@ -56,13 +56,14 @@ class ImageCropper:
         tuple: A tuple of (cropped_image (numpy array), list of reference points defining the selected rectangle).
                If no selection is made, returns None.
         """
-        cv2.namedWindow("image")
-        cv2.setMouseCallback("image", self.click_and_crop)
+        cv2.namedWindow("Select area and press 'c' to continue (or 'r' to reset the area)")
+        cv2.setMouseCallback("Select area and press 'c' to continue (or 'r' to reset the area)", self.click_and_crop)
 
+        print("Select area and press 'c' to continue (or 'r' to reset the area)")
         # Keep looping until the 'q' key is pressed
         while True:
             # Display the image and wait for a keypress
-            cv2.imshow("image", self.image)
+            cv2.imshow("Select area and press 'c' to continue (or 'r' to reset the area)", self.image)
             key = cv2.waitKey(1) & 0xFF
 
             # If the 'r' key is pressed, reset the cropping region

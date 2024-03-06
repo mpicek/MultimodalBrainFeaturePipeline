@@ -1,11 +1,11 @@
 import numpy as np
-from skimage import io, filters, measure, color, morphology
+from skimage import filters, morphology
 from scipy import signal
 import matplotlib.pyplot as plt
-from LED_video_crop import crop_subsampled_LED_red_channel_from_video_for_std
 import cv2
+import pyrealsense2 as rs
 
-def get_LED_mask(video_array, visualize_pipeline=False):
+def get_LED_mask(video_array, visualize_pipeline=False, cropped_LED_image_colorful=None):
     """
     Generates a mask for LED region in a video based on frame variability.
 
@@ -21,6 +21,7 @@ def get_LED_mask(video_array, visualize_pipeline=False):
     Parameters:
     - video_array (np.ndarray): 3D array of shape (n_frames, height, width), representing the video.
     - visualize_pipeline (bool): If True, visualizes intermediate processing steps.
+    - cropped_LED_image_colorful (np.ndarray): A colorful image of the cropped LED (just for visualization purposes).
 
     Returns:
     - np.ndarray: 2D boolean array (a mask) indicating LED regions.
@@ -44,9 +45,27 @@ def get_LED_mask(video_array, visualize_pipeline=False):
     dilated_image = morphology.dilation(eroded_image, morphology.disk(3))  # Adjust the structuring element as needed
 
     if visualize_pipeline:
+        visualize_LED_detection_pipeline(std_image, blurred_image, binary_image, dilated_image, cropped_LED_image_colorful)
 
-        # Visualize the processing steps
-        fig, axes = plt.subplots(1, 4, figsize=(20, 5))
+    return dilated_image
+
+def visualize_LED_detection_pipeline(std_image, blurred_image, binary_image, dilated_image, cropped_LED_image_colorful=None):
+    """
+    Visualizes the steps in the LED detection pipeline.
+
+    Parameters:
+    - std_image (np.ndarray): The original image or the image after applying a standard deviation filter,
+                              represented in grayscale.
+    - blurred_image (np.ndarray): The image after applying a blurring filter, represented in grayscale.
+    - binary_image (np.ndarray): The image after thresholding, represented in binary (black and white).
+    - dilated_image (np.ndarray): The image after applying dilation, enhancing features in the binary image.
+    - cropped_LED_image_colorful (np.ndarray, optional): The cropped image of the LED signal in BGR format.
+                                                          If provided, it is included in the visualization.
+    """
+
+    # Visualize the processing steps
+    if cropped_LED_image_colorful is None:
+        fig, axes = plt.subplots(1, 4, figsize=(24, 6))
         ax = axes.ravel()
 
         ax[0].imshow(std_image, cmap='gray')
@@ -68,9 +87,34 @@ def get_LED_mask(video_array, visualize_pipeline=False):
         plt.tight_layout()
         plt.show()
 
-    return dilated_image
+    else:
+        fig, axes = plt.subplots(1, 5, figsize=(30, 6))
+        ax = axes.ravel()
 
-def get_LED_signal(video_path, LED_mask, ref_point, n_frames, downscale_factor):
+        ax[0].imshow(cv2.cvtColor(cropped_LED_image_colorful, cv2.COLOR_RGB2BGR))
+        ax[0].set_title('Cropped LED')
+        ax[0].axis('off')
+
+        ax[1].imshow(std_image, cmap='gray')
+        ax[1].set_title('Variance')
+        ax[1].axis('off')
+
+        ax[2].imshow(blurred_image, cmap='gray')
+        ax[2].set_title('Blurred Image')
+        ax[2].axis('off')
+
+        ax[3].imshow(binary_image, cmap='gray')
+        ax[3].set_title('Binary Image')
+        ax[3].axis('off')
+
+        ax[4].imshow(dilated_image, cmap='gray')
+        ax[4].set_title('Binary Image after Erosion and Dilation')
+        ax[4].axis('off')
+
+        plt.tight_layout()
+        plt.show()
+
+def get_LED_signal_from_video(video_path, LED_mask, ref_point, n_frames, downscale_factor):
     """
     Extracts the LED signal from a video, given an LED mask (for the cropped area)
     and reference points in the original video (to be cropped).
@@ -137,6 +181,25 @@ def get_LED_signal(video_path, LED_mask, ref_point, n_frames, downscale_factor):
     
     return np.array(average_values)
 
+def get_LED_signal_from_array(video_array, LED_mask):
+    """
+    Calculates the average LED signal intensity over time from a video array.
+
+    Parameters:
+    - video_array (np.ndarray): Video data as (n_frames, height, width).
+    - LED_mask (np.ndarray): Boolean mask for the LED area (height, width).
+
+    Returns:
+    - np.ndarray: Average intensity of the LED area per frame (n_frames,).
+    """
+
+    # Ensure the mask is boolean for indexing
+    LED_mask = LED_mask.astype(bool)
+    video_array = video_array[:, LED_mask]
+    average_values = np.mean(video_array, axis=1)
+    
+    return average_values
+
 def compute_offset(realsense_LED_signal, camera_LED_signal):
     """
     Computes the time offset between two LED signals using cross-correlation.
@@ -156,29 +219,10 @@ def compute_offset(realsense_LED_signal, camera_LED_signal):
                  it goes into the past if lag > 0 which is nonexistent, so don't use this because it would
                  roll over to the end of realsense_LED_signal, which is not correct)
     """
+
     correlation = np.correlate(realsense_LED_signal, camera_LED_signal, mode='full')
     lags = signal.correlation_lags(realsense_LED_signal.size, camera_LED_signal.size, mode="full")
     lag = lags[np.argmax(correlation)]
 
     return lag
 
-
-if __name__ == "__main__":
-    video_path = '/home/mpicek/repos/master_project/test_data/camera/C0359.MP4'
-    n_frames = 10000
-    downscale_factor = 2
-    downsample_frames_factor = 25
-    subsampled_video_array, ref_point = crop_subsampled_LED_red_channel_from_video_for_std(video_path, n_frames, downscale_factor, downsample_frames_factor)
-    binary_mask = get_LED_mask(subsampled_video_array, visualize_pipeline=True)
-
-    if subsampled_video_array is not None:
-        print(f"Resized video array shape: {subsampled_video_array.shape}")
-        # The shape will be (num_frames, new_height, new_width, channels)
-    
-    average_values = get_LED_signal(video_path, binary_mask, ref_point, n_frames, downscale_factor)
-    import matplotlib.pyplot as plt
-    plt.plot(np.arange(len(average_values)) / 25, average_values)
-    plt.xlabel('Time (s)')
-    plt.ylabel('Average pixel value')
-    plt.title('Average pixel value over time')
-    plt.show()
