@@ -61,8 +61,8 @@ def draw_face_landmarks_on_image(rgb_image, detection_result):
 
   return annotated_image
 
-def setup_mediapipe_pose():
-    base_options = python.BaseOptions(model_asset_path='/home/mpicek/repos/master_project/mediapipe_models/pose_landmarker_full.task')
+def setup_mediapipe_pose(mediapipe_face_model_file):
+    base_options = python.BaseOptions(model_asset_path=mediapipe_face_model_file)
     options = vision.PoseLandmarkerOptions(
         base_options=base_options,
         output_segmentation_masks=True)
