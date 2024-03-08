@@ -1,8 +1,10 @@
 import pandas as pd
 import scipy.io
 import numpy as np
+from scipy.signal import resample
 
-def get_accelerometer_data(mat_file):
+
+def get_accelerometer_data_(mat_file):
     """
     Extracts and processes accelerometer data from a MATLAB file, 
     interpolating missing values and subsampling to match a specified frequency.
@@ -10,8 +12,7 @@ def get_accelerometer_data(mat_file):
     This function performs the following steps:
     1. Loads accelerometer data from a specified MATLAB file.
     2. Interpolates missing values (NaNs) linearly to fill gaps in the data.
-    3. Subsamples the interpolated data to match the target frequency of 30 Hz, 
-       which involves selecting every 19.5th data point to align with video frame rate for synchronization purposes.
+    3. Resamples the data to achieve the sampling rate of 30Hz.
 
     Parameters:
     - mat_file (str): The path to the MATLAB (.mat) file containing accelerometer data.
@@ -23,7 +24,7 @@ def get_accelerometer_data(mat_file):
 
     Note:
     - The function assumes the accelerometer data is stored in the MATLAB file under the key 'STREAMS' > 'Signal_stream_1'.
-    - It is also assumed that the original sampling rate of the accelerometer data is ~585Hz.
+    - It is also assumed that the original sampling rate of the accelerometer data is 585.1375 Hz.
     - The interpolation and subsampling process is designed to synchronize accelerometer data with video data recorded at 30 Hz,
       by effectively reducing the accelerometer data's sampling rate to match the video frame rate.
     """
@@ -33,20 +34,20 @@ def get_accelerometer_data(mat_file):
     df = pd.DataFrame(data_acc, columns=['x', 'y', 'z'])
     oversampled = df.interpolate(method='linear', axis=0).bfill()
 
-    # at this point, we have interpolated data instead of nans (it is "oversampled")
-    # now, we need to subsample it to the same frequency as the video (30 Hz) -> 585/30 = 19.5
-    # so we take every 19.5th measurement
+    original_freq = 585.1375
+    desired_rate = 30
 
-    fractional_indices = np.arange(0, len(oversampled), 19.5)
+    # Calculate the duration of your signal
+    num_samples = len(oversampled)
+    duration = num_samples / original_freq
 
-    interpolated_data = np.zeros((len(fractional_indices), 3)) # here the data will be stored
+    # Calculate the new number of samples required for the desired rate
+    new_num_samples = int(np.round(duration * desired_rate))
 
-    # Original indices (from 0 to length of your array)
-    original_indices = np.arange(len(oversampled))
+    interpolated_x = resample(oversampled['x'], new_num_samples)
+    interpolated_y = resample(oversampled['y'], new_num_samples)
+    interpolated_z = resample(oversampled['z'], new_num_samples)
 
-    for i, coordinate in enumerate(['x', 'y', 'z']):
-        column_data = oversampled[coordinate] # because it's a pandas dataframe
-        interpolated_data[:, i] = np.interp(fractional_indices, original_indices, column_data)    
+    interpolated_data = np.column_stack((interpolated_x, interpolated_y, interpolated_z))
 
     return interpolated_data
-
