@@ -92,184 +92,187 @@ def extract_face_vector(path_bag, mediapipe_face_model_file):
 
     face_coordinate_system = None
 
-    try:
-        while True:
-            try:
-                frames = pipeline.wait_for_frames()
-            except:
-                print("READING ERROR")
-                playback.set_real_time(True)
+    while True:
+        try:
+            frames = pipeline.wait_for_frames()
+        except:
+            print("READING ERROR")
+            playback.set_real_time(True)
 
 
-            depth_frame = frames.get_depth_frame()
-            color_frame = frames.get_color_frame()
+        depth_frame = frames.get_depth_frame()
+        color_frame = frames.get_color_frame()
 
-            playback.set_real_time(False)
+        playback.set_real_time(False)
 
+        # skipped frame by RealSense
+        if not depth_frame or not color_frame:
+            print("SKIPPED FRAME BY THE REALSENSE!")
+            if len(forehead_points) > 0:
+                forehead_points.append(forehead_points[-1])
+                quality.append(0)
+            else:
+                raise Exception("Skipped frame by RealSense at the beginning of the .bag file. We need to account for that in the length of the video (variable duration) (for FPS compuatation later).")
+            continue
 
-            # skipped frame by RealSense
-            if not depth_frame or not color_frame:
-                print("SKIPPED FRAME! HANDLE IT!")
-                continue
+        frame_nb = color_frame.get_frame_number()
 
-            last_frame_nb = frame_nb
-            frame_nb = color_frame.get_frame_number()
+        # finish of the file (no more new frames)
+        if frame_nb < max_frame_nb:
+            break
 
-            # finish of the file (no more new frames)
-            if frame_nb < max_frame_nb:
-                break
+        max_frame_nb = frame_nb
 
-            max_frame_nb = frame_nb
+        ts = frames.get_timestamp()
 
-            ts = frames.get_timestamp()
+        # TODO; process also the depth image
+        depth_image_rs = np.asanyarray(depth_frame.get_data())
+        color_image_rs = np.asanyarray(color_frame.get_data()) # returns RGB!
 
+        if first_frame: 
+            t0 = ts
+            first_frame = False
+        
+        # the video is at the end (without the last second) so we kill the reading
+        # (there was an error with the last frame, this handles it)
+        if ts - t0 + 1000 > duration:
+            break
 
-            depth_image_rs = np.asanyarray(depth_frame.get_data())
-            color_image_rs = np.asanyarray(color_frame.get_data()) # returns RGB!
+        if prev_ts >= int(ts-t0):
+            # doubled frame or some other error in ordering (we don't include the frame
+            # as we don't want it multiple times)
+            continue
 
-            if first_frame: 
-                t0 = ts
-                first_frame = False
-            
-            # the video is at the end (without the last second) so we kill the reading
-            # (there was an error with the last frame, this handles it)
-            if ts - t0 + 1000 > duration:
-                break
+        if face_location is None:
+            # convert it to BGR as face_recognition uses BGR
+            face_locations = face_recognition.face_locations(cv2.cvtColor(color_image_rs, cv2.COLOR_RGB2BGR))
+            if len(face_locations) == 0:
+                raise Exception("No face detected in the first frame.")
+            for face_location in face_locations:
 
-            if prev_ts >= int(ts-t0):
-                # doubled frame or some other error in ordering (we don't include the frame
-                # as we don't want it multiple times)
-                continue
+                top, right, bottom, left = face_location
+                face_width = right - left
+                face_height = bottom - top
 
-            if face_location is None:
-                # convert it to BGR as face_recognition uses BGR
-                face_locations = face_recognition.face_locations(cv2.cvtColor(color_image_rs, cv2.COLOR_RGB2BGR))
-                for face_location in face_locations:
+        # Crop the face
+        # we cut the face with some margin around it (defined by around_face_factor * face_width or face_height)
+        # but we have to be careful not to go out of the image (that's why all the max and min functions)                    
+        face_image = color_image_rs[
+            max(0, top - int(face_height * around_face_factor)):min(img_height, int(bottom + face_height * around_face_factor)),
+            max(0, left - int(face_width * around_face_factor)):min(img_width, int(right + face_width * around_face_factor))
+        ]
 
-                    top, right, bottom, left = face_location
-                    face_width = right - left
-                    face_height = bottom - top
+        image = mp.Image(image_format=mp.ImageFormat.SRGB, data=cv2.cvtColor(face_image, cv2.COLOR_BGR2RGB))
+        detection_result = detector.detect(image)
+        try:
+            # Detect the point on forehead (and z is relative, but we don't care about it because a person
+            # moves the head in an "angular" way and not back and forth. And the point is on the forehead,
+            # so the angle of the head is going to be very similar to the z coordinate. It's an approximation
+            # that should be good enough for our purposes)
+            # We need to normalize the coordinates because mediapipe returns just the relative coordinates to the
+            # size of the image. So we multiply it by the width and height of the image (cropped area only in our case
+            # as mediapipe operates only on the cropped image!!). And, according to mediapipe docs, the z coordinate
+            # is approximately of the same magnitude as x
+            forehead_points.append(np.array([
+                detection_result.face_landmarks[0][8].x * color_image_rs.shape[1],
+                detection_result.face_landmarks[0][8].y * color_image_rs.shape[0],
+                detection_result.face_landmarks[0][8].z * color_image_rs.shape[1],
+            ]))
 
-            # Crop the face
-            # we cut the face with some margin around it (defined by around_face_factor * face_width or face_height)
-            # but we have to be careful not to go out of the image (that's why all the max and min functions)                    
-            face_image = color_image_rs[
-                max(0, top - int(face_height * around_face_factor)):min(img_height, int(bottom + face_height * around_face_factor)),
-                max(0, left - int(face_width * around_face_factor)):min(img_width, int(right + face_width * around_face_factor))
-            ]
+            quality.append(1)
 
-            image = mp.Image(image_format=mp.ImageFormat.SRGB, data=cv2.cvtColor(face_image, cv2.COLOR_BGR2RGB))
-            detection_result = detector.detect(image)
-            try:
-                # Detect the point on forehead (and z is relative, but we don't care about it because a person
-                # moves the head in an "angular" way and not back and forth. And the point is on the forehead,
-                # so the angle of the head is going to be very similar to the z coordinate. It's an approximation
-                # that should be good enough for our purposes)
-                # We need to normalize the coordinates because mediapipe returns just the relative coordinates to the
-                # size of the image. So we multiply it by the width and height of the image (cropped area only in our case
-                # as mediapipe operates only on the cropped image!!). And, according to mediapipe docs, the z coordinate
-                # is approximately of the same magnitude as x
-                forehead_points.append(np.array([
-                    detection_result.face_landmarks[0][8].x * color_image_rs.shape[1],
-                    detection_result.face_landmarks[0][8].y * color_image_rs.shape[0],
-                    detection_result.face_landmarks[0][8].z * color_image_rs.shape[1],
-                ]))
+            if face_coordinate_system is None:
+                # We find the face coordinate system in the first detected frame (this will be the reference)
+                # It's gonna be in matrix [x, y, z] where x, y, z are the bases of the coordinate system
+                # they are normalized. X and Y don't have to be necessarily orthogonal, but we assume they are
+                # z is orthogonal to x and y
 
-                quality.append(1)
+                # it's a nose point :)
+                face_coordinate_system = True
 
-                if face_coordinate_system is None:
-                    # We find the face coordinate system in the first detected frame (this will be the reference)
-                    # It's gonna be in matrix [x, y, z] where x, y, z are the bases of the coordinate system
-                    # they are normalized. X and Y don't have to be necessarily orthogonal, but we assume they are
-                    # z is orthogonal to x and y
+                face_coordinates_origin = np.array([
+                    detection_result.face_landmarks[0][1].x * color_image_rs.shape[1],
+                    detection_result.face_landmarks[0][1].y * color_image_rs.shape[0],
+                    detection_result.face_landmarks[0][1].z * color_image_rs.shape[1],
+                ])
 
-                    # it's a nose point :)
-                    face_coordinate_system = True
+                nose_vector = np.zeros((3,))
 
-                    face_coordinates_origin = np.array([
-                        detection_result.face_landmarks[0][1].x * color_image_rs.shape[1],
-                        detection_result.face_landmarks[0][1].y * color_image_rs.shape[0],
-                        detection_result.face_landmarks[0][1].z * color_image_rs.shape[1],
-                    ])
+                nose_vector[0] = (detection_result.face_landmarks[0][8].x - detection_result.face_landmarks[0][2].x)
+                nose_vector[1] = (detection_result.face_landmarks[0][8].y - detection_result.face_landmarks[0][2].y)
+                nose_vector[2] = (detection_result.face_landmarks[0][8].z - detection_result.face_landmarks[0][2].z)
+                nose_vector = nose_vector / np.linalg.norm(nose_vector)
+                
+                eye_vector = np.zeros((3,))
+                eye_vector[0] = (detection_result.face_landmarks[0][33].x - detection_result.face_landmarks[0][263].x)
+                eye_vector[1] = (detection_result.face_landmarks[0][33].y - detection_result.face_landmarks[0][263].y)
+                eye_vector[2] = (detection_result.face_landmarks[0][33].z - detection_result.face_landmarks[0][263].z)
+                eye_vector = eye_vector / np.linalg.norm(eye_vector)
 
-                    nose_vector = np.zeros((3,))
+                # we want to find the orthogonalized eye vector - Let's use Gram Schmidt process
+                # so we subtract the projection of the eye vector to the nose vector from the eye vector
+                # projection is <v1 . v2> * v1 (it's how much it's projeceted times v1 which is the direction
+                # of the projection). This will be subtracted from the original vector to get the orthogonalized:
+                # v2_orth = v2 - <v1 . v2> * v1
+                # (and we suppose that both vectors are normalized, so we don't have to divide by the norms)
+                eye_vector_orthogonalized = eye_vector - np.dot(eye_vector, nose_vector) * nose_vector
+                # and normalize it to be sure
+                eye_vector_orthogonalized = eye_vector_orthogonalized / np.linalg.norm(eye_vector_orthogonalized)
 
-                    nose_vector[0] = (detection_result.face_landmarks[0][8].x - detection_result.face_landmarks[0][2].x)
-                    nose_vector[1] = (detection_result.face_landmarks[0][8].y - detection_result.face_landmarks[0][2].y)
-                    nose_vector[2] = (detection_result.face_landmarks[0][8].z - detection_result.face_landmarks[0][2].z)
-                    nose_vector = nose_vector / np.linalg.norm(nose_vector)
-                    
-                    eye_vector = np.zeros((3,))
-                    eye_vector[0] = (detection_result.face_landmarks[0][33].x - detection_result.face_landmarks[0][263].x)
-                    eye_vector[1] = (detection_result.face_landmarks[0][33].y - detection_result.face_landmarks[0][263].y)
-                    eye_vector[2] = (detection_result.face_landmarks[0][33].z - detection_result.face_landmarks[0][263].z)
-                    eye_vector = eye_vector / np.linalg.norm(eye_vector)
+                third_orthogonal_vector = np.cross(nose_vector, eye_vector_orthogonalized)
+                third_orthogonal_vector = third_orthogonal_vector / np.linalg.norm(third_orthogonal_vector)
 
-                    # we want to find the orthogonalized eye vector - Let's use Gram Schmidt process
-                    # so we subtract the projection of the eye vector to the nose vector from the eye vector
-                    # projection is <v1 . v2> * v1 (it's how much it's projeceted times v1 which is the direction
-                    # of the projection). This will be subtracted from the original vector to get the orthogonalized:
-                    # v2_orth = v2 - <v1 . v2> * v1
-                    # (and we suppose that both vectors are normalized, so we don't have to divide by the norms)
-                    eye_vector_orthogonalized = eye_vector - np.dot(eye_vector, nose_vector) * nose_vector
-                    # and normalize it to be sure
-                    eye_vector_orthogonalized = eye_vector_orthogonalized / np.linalg.norm(eye_vector_orthogonalized)
+                # this would transform points in face coordinates to the camera coordinates
+                face2cam = np.column_stack((nose_vector, eye_vector_orthogonalized, third_orthogonal_vector))
 
-                    third_orthogonal_vector = np.cross(nose_vector, eye_vector_orthogonalized)
-                    third_orthogonal_vector = third_orthogonal_vector / np.linalg.norm(third_orthogonal_vector)
+                # this would transform points in camera coordinates to the face coordinates
+                # it's gonna have an inverse as it was a orthonormal matrix (it's actually its transpose..)
+                cam2face = np.linalg.inv(face2cam)
 
-                    # this would transform points in face coordinates to the camera coordinates
-                    face2cam = np.column_stack((nose_vector, eye_vector_orthogonalized, third_orthogonal_vector))
+        except:
+            print("Mediapipe didn't detect a thing! Using the last valid values.")
+            if len(forehead_points) > 0:
+                forehead_points.append(forehead_points[-1])
+                quality.append(0)
+            else:
+                duration -= 1000/30 # to account for the lost frames at the beginning
 
-                    # this would transform points in camera coordinates to the face coordinates
-                    # it's gonna have an inverse as it was a orthonormal matrix (it's actually its transpose..)
-                    cam2face = np.linalg.inv(face2cam)
+        # STEP 5: Process the detection result. In this case, visualize it.
+        annotated_image = draw_face_landmarks_on_image(image.numpy_view(), detection_result)
+        cv2.imshow("Face features", cv2.cvtColor(annotated_image, cv2.COLOR_BGR2RGB))
 
-            except:
-                print("Mediapipe didn't detect a thing! Using the last valid values.")
-                if len(forehead_points) > 0:
-                    forehead_points.append(forehead_points[-1])
-                    quality.append(0)
-                else:
-                    duration -= 1000/30 # to account for the lost frames at the beginning
+        prev_prev_ts = prev_ts
+        prev_ts = int(ts-t0)
 
-            # STEP 5: Process the detection result. In this case, visualize it.
-            annotated_image = draw_face_landmarks_on_image(image.numpy_view(), detection_result)
-            cv2.imshow("Face features", cv2.cvtColor(annotated_image, cv2.COLOR_BGR2RGB))
+        if prev_ts - prev_prev_ts > 2*int(1000/30) - 10:
+            print(f"Skipped frame. Previous ts: {prev_ts}, difference {prev_ts - prev_prev_ts}")
+            if len(forehead_points) > 0:
+                forehead_points.append(forehead_points[-1])
+                quality.append(0)
 
-            prev_prev_ts = prev_ts
-            prev_ts = int(ts-t0)
+        time_series.append([prev_ts])
 
-            if prev_ts - prev_prev_ts > 2*int(1000/30) - 10:
-                print(f"Skipped frame. Previous ts: {prev_ts}, difference {prev_ts - prev_prev_ts}")
-                if len(forehead_points) > 0:
-                    forehead_points.append(forehead_points[-1])
-                    quality.append(0)
+        ch = cv2.waitKey(1)
+        if ch==113: #q pressed
+            break
 
-            time_series.append([prev_ts])
+        if len(time_series) % (60*30) == 0:
+            print(f"{len(time_series) / (60*30)} minutes processed")
 
-            ch = cv2.waitKey(1)
-            if ch==113: #q pressed
-                break
+        t = ts - t0
 
-            if len(time_series) % (60*30) == 0:
-                print(f"{len(time_series) / (60*30)} minutes processed")
+        if frame_nb > 100:
+            ax.cla()
+            indices = np.arange(len(forehead_points))
+            x = smooth(np.gradient(np.array(forehead_points)[:, 0]), 20)
+            y = smooth(np.gradient(np.array(forehead_points)[:, 1]), 20)
+            z = smooth(np.gradient(np.array(forehead_points)[:, 2]), 20)
+            ax.plot(indices, x, label='x')
+            ax.plot(indices, y, label='y')
+            ax.plot(indices, z, label='z')
+            clear_output(wait = True)
+            plt.pause(0.00000001)
 
-            t = ts - t0
-
-            if frame_nb > 100:
-                ax.cla()
-                indices = np.arange(len(forehead_points))
-                x = smooth(np.gradient(np.array(forehead_points)[:, 0]), 20)
-                y = smooth(np.gradient(np.array(forehead_points)[:, 1]), 20)
-                z = smooth(np.gradient(np.array(forehead_points)[:, 2]), 20)
-                ax.plot(indices, x, label='x')
-                ax.plot(indices, y, label='y')
-                ax.plot(indices, z, label='z')
-                clear_output(wait = True)
-                plt.pause(0.00000001)
-
-    finally:
         pipeline.stop()
         cv2.destroyAllWindows()
         forehead_points = np.stack(forehead_points)
