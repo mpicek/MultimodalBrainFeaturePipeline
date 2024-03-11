@@ -249,6 +249,8 @@ def extract_face_vector(path_bag, mediapipe_face_model_file):
             if len(forehead_points) > 0:
                 forehead_points.append(forehead_points[-1])
                 quality.append(0)
+            else:
+                raise Exception("We have to account for a shorter video duration (variable duration) because of the skipped frames at the beginning.")
 
         time_series.append([prev_ts])
 
@@ -273,17 +275,17 @@ def extract_face_vector(path_bag, mediapipe_face_model_file):
             clear_output(wait = True)
             plt.pause(0.00000001)
 
-        pipeline.stop()
-        cv2.destroyAllWindows()
-        forehead_points = np.stack(forehead_points)
-        quality = np.stack(quality)
+    pipeline.stop()
+    cv2.destroyAllWindows()
+    forehead_points = np.stack(forehead_points)
+    quality = np.stack(quality)
     
     return forehead_points, quality, face2cam, cam2face, face_coordinates_origin, duration/1000
 
 if __name__ == '__main__':
 
-    # path_bag = "/home/mpicek/repos/master_project/test_data/corresponding/cam0_911222060374_record_13_11_2023_1330_19.bag"
-    path_bag = "/home/mpicek/repos/master_project/test_data/corresponding/cam0_911222060374_record_13_11_2023_1337_20.bag"
+    path_bag = "/home/mpicek/repos/master_project/test_data/corresponding/cam0_911222060374_record_13_11_2023_1330_19.bag"
+    # path_bag = "/home/mpicek/repos/master_project/test_data/corresponding/cam0_911222060374_record_13_11_2023_1337_20.bag"
     forehead_points, quality_data, face2cam, cam2face, face_coordinates_origin, duration = extract_face_vector(path_bag, mediapipe_face_model_file = '/home/mpicek/Downloads/face_landmarker.task')
     output_filename = 'forehead_points_20.npy'
     quality_output_filename = 'quality_20.npy'
