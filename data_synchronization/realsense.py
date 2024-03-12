@@ -190,23 +190,27 @@ def extract_face_vector(path_bag, mediapipe_face_model_file):
                 # it's a nose point :)
                 face_coordinate_system = True
 
+                # mediapipe returns y going down, we want it to go up (thus the minus sign in y coordinate)
                 face_coordinates_origin = np.array([
                     detection_result.face_landmarks[0][1].x * color_image_rs.shape[1],
-                    detection_result.face_landmarks[0][1].y * color_image_rs.shape[0],
+                    -detection_result.face_landmarks[0][1].y * color_image_rs.shape[0],
                     detection_result.face_landmarks[0][1].z * color_image_rs.shape[1],
                 ])
 
                 nose_vector = np.zeros((3,))
 
                 nose_vector[0] = (detection_result.face_landmarks[0][8].x - detection_result.face_landmarks[0][2].x)
-                nose_vector[1] = (detection_result.face_landmarks[0][8].y - detection_result.face_landmarks[0][2].y)
+                # mediapipe returns y going down, we want it to go up (thus the minus sign in y coordinate)
+                nose_vector[1] = -(detection_result.face_landmarks[0][8].y - detection_result.face_landmarks[0][2].y)
                 nose_vector[2] = (detection_result.face_landmarks[0][8].z - detection_result.face_landmarks[0][2].z)
                 nose_vector = nose_vector / np.linalg.norm(nose_vector)
                 
+                # eye vector going from right to left
                 eye_vector = np.zeros((3,))
-                eye_vector[0] = (detection_result.face_landmarks[0][33].x - detection_result.face_landmarks[0][263].x)
-                eye_vector[1] = (detection_result.face_landmarks[0][33].y - detection_result.face_landmarks[0][263].y)
-                eye_vector[2] = (detection_result.face_landmarks[0][33].z - detection_result.face_landmarks[0][263].z)
+                eye_vector[0] = (detection_result.face_landmarks[0][263].x - detection_result.face_landmarks[0][33].x)
+                # mediapipe returns y going down, we want it to go up (thus the minus sign in y coordinate)
+                eye_vector[1] = -(detection_result.face_landmarks[0][263].y - detection_result.face_landmarks[0][33].y)
+                eye_vector[2] = (detection_result.face_landmarks[0][263].z - detection_result.face_landmarks[0][33].z)
                 eye_vector = eye_vector / np.linalg.norm(eye_vector)
 
                 # we want to find the orthogonalized eye vector - Let's use Gram Schmidt process
@@ -223,7 +227,8 @@ def extract_face_vector(path_bag, mediapipe_face_model_file):
                 third_orthogonal_vector = third_orthogonal_vector / np.linalg.norm(third_orthogonal_vector)
 
                 # this would transform points in face coordinates to the camera coordinates
-                face2cam = np.column_stack((nose_vector, eye_vector_orthogonalized, third_orthogonal_vector))
+                face2cam = np.column_stack((eye_vector_orthogonalized, nose_vector, third_orthogonal_vector))
+                print(face2cam)
 
                 # this would transform points in camera coordinates to the face coordinates
                 # it's gonna have an inverse as it was a orthonormal matrix (it's actually its transpose..)
@@ -284,8 +289,8 @@ def extract_face_vector(path_bag, mediapipe_face_model_file):
 
 if __name__ == '__main__':
 
-    path_bag = "/home/mpicek/repos/master_project/test_data/corresponding/cam0_911222060374_record_13_11_2023_1330_19.bag"
-    # path_bag = "/home/mpicek/repos/master_project/test_data/corresponding/cam0_911222060374_record_13_11_2023_1337_20.bag"
+    # path_bag = "/home/mpicek/repos/master_project/test_data/corresponding/cam0_911222060374_record_13_11_2023_1330_19.bag"
+    path_bag = "/home/mpicek/repos/master_project/test_data/corresponding/cam0_911222060374_record_13_11_2023_1337_20.bag"
     forehead_points, quality_data, face2cam, cam2face, face_coordinates_origin, duration = extract_face_vector(path_bag, mediapipe_face_model_file = '/home/mpicek/Downloads/face_landmarker.task')
     output_filename = 'forehead_points_20.npy'
     quality_output_filename = 'quality_20.npy'
