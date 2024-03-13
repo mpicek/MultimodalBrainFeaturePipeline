@@ -1,5 +1,7 @@
 
 import numpy as np
+import face_recognition
+import cv2
 
 def get_face_coordinate_system(detection_result, color_image):
     """
@@ -92,3 +94,35 @@ def get_forehead_point(detection_result, color_image):
         detection_result.face_landmarks[0][8].y * color_image.shape[0],
         detection_result.face_landmarks[0][8].z * color_image.shape[1],
     ])
+
+class NoFaceDetectedException(Exception):
+    pass
+
+def recognize_patient(color_image, patients_encoding):
+    """
+    Parameters:
+    - color_image (numpy.ndarray): The color image (RGB) in which to recognize the patient's face. Expected shape is (height, width, 3).
+    - patients_encoding (np.ndarray): Encoding of the patient's face(s)
+
+    Returns:
+    - tuple: A tuple of 4 integers representing the location of the patient's face in the image: (top, right, bottom, left).
+
+    Raises:
+    - NoFaceDetectedException: If no faces are detected in the provided image.
+
+    Note:
+    - The face recognition model used is 'cnn' - a slower but much better model for face localization than the default 'hog' model.
+    """
+
+    # face_recognition library works with BGR images
+    locations = face_recognition.face_locations(cv2.cvtColor(color_image, cv2.COLOR_RGB2BGR), model='cnn')
+    encodings = face_recognition.face_encodings(cv2.cvtColor(color_image, cv2.COLOR_RGB2BGR), known_face_locations=locations)
+
+    if len(locations) == 0:
+        raise NoFaceDetectedException("No face detected in the image")
+    
+    face_distances = face_recognition.face_distance(encodings, patients_encoding)
+    patients_face_index = np.argmin(face_distances)
+    patients_face_location = locations[patients_face_index]
+
+    return patients_face_location

@@ -7,14 +7,15 @@ import face_recognition
 import matplotlib.pyplot as plt
 import mediapipe as mp
 from IPython.display import clear_output
-from synchronization_utils import get_face_coordinate_system, get_forehead_point
+from synchronization_utils import get_face_coordinate_system, get_forehead_point, recognize_patient, NoFaceDetectedException
 from mediapipe_utils import *
 from signal_utils import *
+import face_recognition
 
 class Exception5000(Exception):
     pass
 
-def extract_face_vector(path_bag, mediapipe_face_model_file, visualize=False):
+def extract_face_vector(path_bag, mediapipe_face_model_file, patients_encoding, visualize=False):
     """
     Extracts a vector representing face movement over time from a realsense .bag file.
 
@@ -40,6 +41,10 @@ def extract_face_vector(path_bag, mediapipe_face_model_file, visualize=False):
               Expressed in the camera coordinate system.
         - duration (float): The duration of the video in seconds.
 
+    Beginning of the processing:
+        1) Detect the patient's face (with face_recognition library) - this region will be used in every frame
+           (we assume the patient doesn't move that much)
+        2) Construct the face coordinate system (with mediapipe library)
 
     Notes:
     - The function assumes a video resolution of 640x480.
@@ -61,7 +66,7 @@ def extract_face_vector(path_bag, mediapipe_face_model_file, visualize=False):
      - weird error at the end (thus I finish 1s before the end) - HANDLED
 
     Raises:
-    - Exception: If there are issues initializing the video pipeline or processing frames.
+    - Exception5000: If frames don't arrive within 5000ms.
     """
 
     detector = setup_mediapipe_face(mediapipe_face_model_file)
@@ -159,17 +164,15 @@ def extract_face_vector(path_bag, mediapipe_face_model_file, visualize=False):
 
         if face_location is None:
             # convert it to BGR as face_recognition uses BGR
-            # TODO: use CNN model for the face detection (next commit)
-            face_locations = face_recognition.face_locations(cv2.cvtColor(color_image_rs, cv2.COLOR_RGB2BGR))
-            if len(face_locations) == 0:
+
+            try:
+                face_location = recognize_patient(color_image_rs, patients_encoding)
+                top, right, bottom, left = face_location
+                face_height = bottom - top
+                face_width = right - left
+            except NoFaceDetectedException:
                 forehead_points.append(np.array([0, 0, 0]))
                 quality.append(0)
-
-            # TODO: detect the patient's face and use it as the face_location (next commit)
-            for face_location in face_locations:
-                top, right, bottom, left = face_location
-                face_width = right - left
-                face_height = bottom - top
 
         # Crop the face
         # we cut the face with some margin around it (defined by around_face_factor * face_width or face_height)
@@ -265,7 +268,11 @@ if __name__ == '__main__':
 
     # path_bag = "/home/mpicek/repos/master_project/test_data/corresponding/cam0_911222060374_record_13_11_2023_1330_19.bag"
     path_bag = "/home/mpicek/repos/master_project/test_data/corresponding/cam0_911222060374_record_13_11_2023_1337_20.bag"
-    forehead_points, quality_data, face2cam, cam2face, face_coordinates_origin, duration = extract_face_vector(path_bag, mediapipe_face_model_file='/home/mpicek/Downloads/face_landmarker.task', visualize=True)
+
+    patient_img = face_recognition.load_image_file('/home/mpicek/repos/master_project/data_synchronization/patient.png')
+    patients_encoding = face_recognition.face_encodings(patient_img)[0] # warning, it's a list!! That's why [0]
+
+    forehead_points, quality_data, face2cam, cam2face, face_coordinates_origin, duration = extract_face_vector(path_bag, mediapipe_face_model_file='/home/mpicek/Downloads/face_landmarker.task', patients_encoding=patients_encoding, visualize=True)
     output_filename = 'forehead_points_20.npy'
     quality_output_filename = 'quality_20.npy'
     face2cam_output_filename = 'face2cam_20.npy'
