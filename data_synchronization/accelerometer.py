@@ -4,7 +4,7 @@ import numpy as np
 from scipy.signal import resample
 
 
-def get_accelerometer_data_(mat_file):
+def get_accelerometer_data(mat_file):
     """
     Extracts and processes accelerometer data from a MATLAB file, 
     interpolating missing values and subsampling to match a specified frequency.
