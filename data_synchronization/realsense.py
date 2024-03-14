@@ -7,15 +7,15 @@ import face_recognition
 import matplotlib.pyplot as plt
 import mediapipe as mp
 from IPython.display import clear_output
-from synchronization_utils import get_face_coordinate_system, get_forehead_point, recognize_patient, NoFaceDetectedException
+from synchronization_utils import get_face_coordinate_system, get_forehead_point, recognize_patient, NoFaceDetectedException, smooth
 from mediapipe_utils import *
-from signal_utils import *
 import face_recognition
+
 
 class Exception5000(Exception):
     pass
 
-def extract_face_vector(path_bag, mediapipe_face_model_file, patients_encoding, visualize=False):
+def extract_face_vector(path_bag, mediapipe_face_model_file, patients_encoding, log_table, visualize=False):
     """
     Extracts a vector representing face movement over time from a realsense .bag file.
 
@@ -68,6 +68,8 @@ def extract_face_vector(path_bag, mediapipe_face_model_file, patients_encoding, 
     Raises:
     - Exception5000: If frames don't arrive within 5000ms.
     """
+
+    
 
     detector = setup_mediapipe_face(mediapipe_face_model_file)
     img_height = 480
@@ -166,13 +168,17 @@ def extract_face_vector(path_bag, mediapipe_face_model_file, patients_encoding, 
             # convert it to BGR as face_recognition uses BGR
 
             try:
-                face_location = recognize_patient(color_image_rs, patients_encoding)
+                face_location, distance = recognize_patient(color_image_rs, patients_encoding)
                 top, right, bottom, left = face_location
                 face_height = bottom - top
                 face_width = right - left
+                log_table['first_frame_face_detected'] = [color_image_rs.copy()]
+                log_table['face_location'] = [face_location]
+                log_table['face_patient_distance'] = [distance]
             except NoFaceDetectedException:
                 forehead_points.append(np.array([0, 0, 0]))
                 quality.append(0)
+                continue
 
         # Crop the face
         # we cut the face with some margin around it (defined by around_face_factor * face_width or face_height)
@@ -261,8 +267,10 @@ def extract_face_vector(path_bag, mediapipe_face_model_file, patients_encoding, 
     forehead_points[:non_zero_index] = forehead_points[non_zero_index]
 
     quality = np.stack(quality)
+    log_table['avg_quality'] = [quality.mean()]
+
     
-    return forehead_points, quality, face2cam, cam2face, face_coordinates_origin, duration/1000
+    return forehead_points, quality, face2cam, cam2face, face_coordinates_origin, duration/1000, log_table
 
 if __name__ == '__main__':
 

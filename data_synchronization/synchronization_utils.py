@@ -3,6 +3,27 @@ import numpy as np
 import face_recognition
 import cv2
 
+log_table_columns = [
+        # the following are for the extraction
+        'path_bag',
+        'output_path',
+        'failed',
+        'date',
+        'avg_quality',
+        'first_frame_face_detected',
+        'face_location',
+        'face_patient_distance',
+        'Exception5000',
+        'unknown_error_extraction',
+        'relevant_wisci_files',
+        # and these are for the synchronization
+        'path_wisci',
+        'normalized_corr',
+        'lag',
+        'fps_bag',
+        'unknown_error_synchronization',
+    ]
+
 def get_face_coordinate_system(detection_result, color_image):
     """
     Establishes a face coordinate system based on detected facial landmarks.
@@ -125,4 +146,42 @@ def recognize_patient(color_image, patients_encoding):
     patients_face_index = np.argmin(face_distances)
     patients_face_location = locations[patients_face_index]
 
-    return patients_face_location
+    return patients_face_location, np.argmin(face_distances)
+
+def smooth(y, box_pts):
+    box = np.ones(box_pts)/box_pts
+    y_smooth = np.convolve(y, box, mode='same')
+    return y_smooth
+
+def rotation_x_axis_counterclws(angle):
+    """
+    angle in degrees
+    """
+    deg_rad = 2*np.pi*angle / 360
+    return np.array([
+            [1, 0, 0],
+            [0, np.cos(deg_rad), -np.sin(deg_rad)],
+            [0, np.sin(deg_rad), np.cos(deg_rad)]
+        ])
+
+def rotation_y_axis_counterclws(angle):
+    """
+    angle in degrees
+    """
+    deg_rad = 2*np.pi*angle / 360
+    return np.array([
+            [np.cos(deg_rad), 0, np.sin(deg_rad)],
+            [0, 1, 0],
+            [-np.sin(deg_rad), 0, np.cos(deg_rad)]
+        ])
+
+def rotation_z_axis_counterclws(angle):
+    """
+    angle in degrees
+    """
+    deg_rad = 2*np.pi*angle / 360
+    return np.array([
+            [np.cos(deg_rad), -np.sin(deg_rad), 0],
+            [np.sin(deg_rad), np.cos(deg_rad), 0],
+            [0, 0, 1]
+        ])
