@@ -7,22 +7,38 @@ import face_recognition
 from realsense import extract_face_vector, Exception5000
 from synchronization_utils import log_table_columns
 
-class Synchronizer:
-    def __init__(self, wisci_server_path, realsense_server_path, output_folder, mediapipe_face_model_file, patient_image_path, log_table_path, synchronize, visualize=False):
+class FaceMovementExtractor:
+    """
+    Extracts face movements from RealSense video.
+
+    Attributes:
+        mediapipe_face_model_file (str): Path to the MediaPipe face model file.
+        patients_encoding (numpy.ndarray): Encoded face data of the patient for recognition.
+        realsense_server_path (str): Base directory path where Realsense data is stored.
+        output_folder (str): Directory path where processed outputs will be saved.
+        log_table_path (str): Path to the CSV file used for logging processing details.
+        visualize (bool): Flag to enable or disable visualization of the processing. Defaults to False.
+
+    Methods:
+        process_directories(): Processes directories containing .bag files, extracts relevant data, and logs the process.
+        _realsense_day_extract(folder_name): Extracts the date from a Realsense folder name.
+        _append_row_and_save(new_row_df): Appends a new row to the log table and saves it.
+        process_bag_and_save(path_bag, output_file_path): Processes a .bag file, saves extracted data, and logs the process.
+    """
+    def __init__(self, realsense_server_path, output_folder, mediapipe_face_model_file, patient_image_path, log_table_path, visualize=False):
         self.mediapipe_face_model_file = mediapipe_face_model_file
         patient_img = face_recognition.load_image_file(patient_image_path)
         self.patients_encoding = face_recognition.face_encodings(patient_img)[0] # warning, it's a list!! That's why [0]
 
-        self.wisci_server_path = wisci_server_path
         self.realsense_server_path = realsense_server_path
         self.output_folder = output_folder
         self.log_table_path = log_table_path
-        self.synchronize = synchronize
         self.visualize = visualize
 
     def process_directories(self):
         """
-        Supposing the .bag files are in the deepest subdirectories of the realsense_server_path,
+        Processes directories containing .bag files, extracts facial movement data, and logs the process.
+        Assumes .bag files are located in the deepest subdirectories of `realsense_server_path`.
 
         realsense_server_path
         ├── 2021_01_01_session
@@ -61,13 +77,7 @@ class Synchronizer:
                     log_table = self.process_bag_and_save(path_bag, output_file_path)
                     log_table['date'] = [date]
 
-                    if self.synchronize and log_table['failed'][0] == 0:
-                        possible_mat_files = self.find_relevant_mat_files(log_table)
-                        log_table['relevant_wisci_files'] = [possible_mat_files]
-
-                        self._append_row_and_save(log_table)
-                    else:
-                        self._append_row_and_save(log_table)
+                    self._append_row_and_save(log_table)
 
     
     def _realsense_day_extract(self, folder_name):
@@ -78,7 +88,7 @@ class Synchronizer:
         folder_name (str): The name of the folder, which may contain a date in the format Year_month_day anywhere.
 
         Returns:
-        str: The extracted date in the format "Year_month_day", or None if no date is found.
+        str: The extracted date in the format "YYYY_MM_DD" , or None if no date is found.
         """
         # Updated regex to search for the date pattern anywhere in the string
         match = re.search(r"(\d{4}_\d{2}_\d{2})", folder_name)
@@ -89,11 +99,10 @@ class Synchronizer:
 
     def _append_row_and_save(self, new_row_df):
         """
-        Appends the log table to the old saved log table (the current new_row_df has just one row,
-        so it appends it to the old log table and saves it). If the old one doesn't exist, it creates a new one.
+        Appends a new row to the log table and saves it. Creates a new log table if it doesn't exist.
 
         Parameters:
-        - new_row_df (pandas.df): pandas df with just one row
+            new_row_df (pandas.DataFrame): DataFrame containing a single row to be appended to the log table.
         """
         
         # Check if the CSV file exists
@@ -114,17 +123,18 @@ class Synchronizer:
 
     def process_bag_and_save(self, path_bag, output_file_path):
         """
-        Processes a bag file to extract forehead points, saves the outputs, and logs the process.
+        Processes a .bag file to extract forehead points, saves the outputs, and logs the process.
 
         Parameters:
         - path_bag (str): Path to the bag file to be processed.
         - output_file_path (str): Directory path where output files will be saved.
-        - visualize (bool, optional): If True, visualizes the process. Defaults to False.
 
         Returns:
         - log_table (DataFrame): A pandas DataFrame containing the log of the operation, including paths, success/failure, and any errors encountered.
 
-        The function attempts to extract facial vectors from the specified bag file using the provided MediaPipe face model and patient encodings. It logs the process, including whether it succeeded or failed, and saves the extracted data to the specified output path. In case of exceptions, it logs the error and marks the operation as failed.
+        The function attempts to extract facial vectors from the specified bag file using the provided MediaPipe face model and patient encodings. 
+        It logs the process, including whether it succeeded or failed, and saves the extracted data to the specified output path. 
+        In case of exceptions, it logs the error and marks the operation as failed.
         """
 
         log_table = pd.DataFrame(columns=log_table_columns)
@@ -150,8 +160,74 @@ class Synchronizer:
 
         return log_table
 
-    def find_relevant_mat_files(self, log_table):
+
+class Synchronizer:
+    """
+    Synchronizes Realsense and WiSci data
+
+    Attributes:
+        mediapipe_face_model_file (str): Path to the MediaPipe face model file.
+        patients_encoding (numpy.ndarray): Encoding of the patient's face from an image.
+        wisci_server_path (str): Directory path where WiSci data is stored.
+        output_folder (str): Directory path where synchronized data will be saved.
+        log_table_path (str): Path to the CSV log table.
+        log_table (pandas.DataFrame): DataFrame loaded from the CSV log table.
+        visualize (bool): Flag to enable or disable visualization of the synchronization process.
+    """
+    def __init__(self, wisci_server_path, output_folder, mediapipe_face_model_file, patient_image_path, log_table_path, visualize=False):
         """
+        Initializes the Synchronizer with paths and settings for data synchronization.
+
+        Parameters:
+            wisci_server_path (str): Path to the directory containing WiSci data.
+            output_folder (str): Path to the directory where output data will be saved.
+            mediapipe_face_model_file (str): Path to the MediaPipe face model file.
+            patient_image_path (str): Path to the image file of the patient for face recognition.
+            log_table_path (str): Path to the CSV file used as a log table.
+            visualize (bool, optional): If True, enables visualization of the process. Defaults to False.
+        """
+        self.mediapipe_face_model_file = mediapipe_face_model_file
+        patient_img = face_recognition.load_image_file(patient_image_path)
+        self.patients_encoding = face_recognition.face_encodings(patient_img)[0] # warning, it's a list!! That's why [0]
+
+        self.wisci_server_path = wisci_server_path
+        self.output_folder = output_folder
+        self.log_table_path = log_table_path
+        # read the csv table
+        self.log_table = pd.read_csv(log_table_path)
+        self.visualize = visualize
+    
+    def synchronize_realsense_between_all_relevant_wisci_files(self):
+        """
+        Goes through the log table and synchronizes Realsense data with relevant WiSci files based on the date.
+
+        Iterates over each row in the log table, skipping rows where the synchronization is done
+        or where the facial point extraction has failed.
+        For each relevant row, it finds matching WiSci files by date and updates the log table with these files.
+        """
+
+        # iterate over rows in the log table
+        for index, row in self.log_table.iterrows():
+            if row['failed'] == 1:
+                continue
+            # column 'path_wisci' has value (meaning it has already been synchronized)
+            if pd.notnull(row['path_wisci']):
+                continue
+
+            possible_mat_files = self.find_relevant_mat_files(row['date']) # TODO: don't I need [0]?
+            self.log_table.at[index, 'relevant_wisci_files'] = possible_mat_files
+            self.log_table.to_csv(self.log_table_path, index=False)
+    
+    def find_relevant_mat_files(self, date):
+        """
+        Finds all .mat files relevant to a given date within the WiSci data directory.
+
+        Parameters:
+            date (str): The date for which to find relevant .mat files, in the format "YYYY_MM_DD".
+
+        Returns:
+            list: A list of paths to the relevant .mat files found.
+            
         wisci_server_path
         ├── 2021_01_01_session
         │   ├── wisci
@@ -164,8 +240,7 @@ class Synchronizer:
         │   │   ├── 2021_01_01_01_01.mat
         │   │   ├── 2021_01_01_01_01.something
         """
-        date = log_table['date'][0]
-        print(date)
+
         possible_mat_files = []
         for folder in os.listdir(self.wisci_server_path):
             print(folder)
@@ -192,7 +267,8 @@ class Synchronizer:
                             mat_file = os.path.join(root, file)
                             possible_mat_files.append(mat_file)
         
-        return possible_mat_files    
+        return possible_mat_files
+    
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Process directories for Realsense and Wisci data.")
@@ -202,16 +278,24 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # print(args)
-    synchronizer = Synchronizer(
-        wisci_server_path=args.wisci_server_path, 
+    face_movement_extractor = FaceMovementExtractor(
         realsense_server_path=args.realsense_server_path, 
         output_folder=args.output_folder, 
         mediapipe_face_model_file='/home/mpicek/Downloads/face_landmarker.task', 
         patient_image_path="/home/mpicek/repos/master_project/data_synchronization/patient.png", 
         log_table_path="/home/mpicek/repos/master_project/processed2/table.csv", 
-        synchronize=True, 
         visualize=True
     )
 
-    synchronizer.process_directories()
+    face_movement_extractor.process_directories()
+
+    synchronizer = Synchronizer(
+        realsense_server_path=args.realsense_server_path, 
+        output_folder=args.output_folder, 
+        mediapipe_face_model_file='/home/mpicek/Downloads/face_landmarker.task', 
+        patient_image_path="/home/mpicek/repos/master_project/data_synchronization/patient.png", 
+        log_table_path="/home/mpicek/repos/master_project/processed2/table.csv", 
+        visualize=True
+    )
+
+    synchronizer.synchronize_realsense_between_all_relevant_wisci_files()
