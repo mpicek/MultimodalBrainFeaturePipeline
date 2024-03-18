@@ -3,6 +3,8 @@ import scipy.io
 import numpy as np
 from scipy.signal import resample
 
+class GettingAccelerometerDataFailed(Exception):
+    pass
 
 def get_accelerometer_data(mat_file):
     """
@@ -15,7 +17,7 @@ def get_accelerometer_data(mat_file):
     3. Resamples the data to achieve the sampling rate of 30Hz.
 
     Parameters:
-    - mat_file (str): The path to the MATLAB (.mat) file containing accelerometer data.
+    - mat_file (str): The path to the MATLAB (.mat) file containing accelerometer data (aka wisci file).
 
     Returns:
     - numpy.ndarray: A 2D array of shape (n, 3), where 'n' is the number of subsampled data points in 30Hz.

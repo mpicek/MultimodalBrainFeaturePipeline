@@ -2,6 +2,8 @@
 import numpy as np
 import face_recognition
 import cv2
+from scipy.signal import resample
+import plotly.graph_objects as go
 
 log_table_columns = [
         # the following are for the extraction
@@ -22,6 +24,12 @@ log_table_columns = [
         'lag',
         'fps_bag',
         'unknown_error_synchronization',
+        'peaks_per_million',
+        'best_second_largest_corr_peak',
+        'second_best_wisci_corr',
+        'second_best_wisci_peaks_per_million',
+        'second_best_wisci_path',
+        'synchronization_failed',
     ]
 
 def get_face_coordinate_system(detection_result, color_image):
@@ -150,7 +158,7 @@ def recognize_patient(color_image, patients_encoding):
 
 def smooth(y, box_pts):
     box = np.ones(box_pts)/box_pts
-    y_smooth = np.convolve(y, box, mode='same')
+    y_smooth = np.convolve(y, box, mode='valid')
     return y_smooth
 
 def rotation_x_axis_counterclws(angle):
@@ -185,3 +193,75 @@ def rotation_z_axis_counterclws(angle):
             [np.sin(deg_rad), np.cos(deg_rad), 0],
             [0, 0, 1]
         ])
+
+def preprocess_accelerometer_data(data, box_size):
+
+    x_acc = smooth(data[:, 0], box_size)
+    y_acc = smooth(data[:, 1], box_size)
+    z_acc = smooth(data[:, 2], box_size)
+    x_acc = np.gradient(x_acc)
+    y_acc = np.gradient(y_acc)
+    z_acc = np.gradient(z_acc)
+
+    x_acc = smooth(x_acc, box_size)
+    y_acc = smooth(y_acc, box_size)
+    z_acc = smooth(z_acc, box_size)
+
+    return np.column_stack([x_acc, y_acc, z_acc])
+
+def preprocess_video_signals(forehead_points, quality, cam2face, original_time, desired_realsense_fps, box_size):
+
+    face2cam = np.linalg.inv(cam2face)
+
+    # we suppose that the Wisci is just 45deg rotated in the y direction 
+    # R_y = rotation_y_axis_counterclws(45)
+    R_x = rotation_x_axis_counterclws(10)
+    R_z = rotation_z_axis_counterclws(10)
+    R_y = rotation_y_axis_counterclws(-33.29)
+
+    in_face_space = np.dot(face2cam, forehead_points.T).T
+    rotated_by_y_cam = np.dot(R_z, in_face_space.T).T
+    rotated_by_z_cam = np.dot(R_y, rotated_by_y_cam.T).T
+    in_wisci_space = np.dot(R_x, rotated_by_z_cam.T).T
+
+    # Assuming `original_signal` is your NumPy array containing the signal
+    original_signal = in_wisci_space  # Your signal data
+    original_rate = in_wisci_space.shape[0] / original_time  # The original sampling rate
+
+    # Calculate the duration of your signal
+    num_samples = original_signal.shape[0]
+    duration = num_samples / original_rate
+
+    # Calculate the new number of samples required for the desired rate
+    new_num_samples = int(np.round(duration * desired_realsense_fps))
+
+    # Use scipy's resample to adjust the signal
+    resampled_signal = resample(original_signal, new_num_samples)
+
+    resampled_quality = resample(quality, new_num_samples)
+
+    x_smoothed = smooth(resampled_signal[:, 0], box_size)
+    y_smoothed = smooth(resampled_signal[:, 1], box_size)
+    z_smoothed = smooth(resampled_signal[:, 2], box_size)
+
+    x_gradient = np.gradient(x_smoothed)
+    y_gradient = np.gradient(y_smoothed)
+    z_gradient = np.gradient(z_smoothed)
+
+    x_gradient_smoothed = smooth(x_gradient, box_size)
+    y_gradient_smoothed = smooth(y_gradient, box_size)
+    z_gradient_smoothed = smooth(z_gradient, box_size)
+
+    x_gradient_smoothed = np.gradient(x_gradient_smoothed)
+    y_gradient_smoothed = np.gradient(y_gradient_smoothed)
+    z_gradient_smoothed = np.gradient(z_gradient_smoothed)
+
+    x_gradient_smoothed = smooth(x_gradient_smoothed, box_size)
+    y_gradient_smoothed = smooth(y_gradient_smoothed, box_size)
+    z_gradient_smoothed = smooth(z_gradient_smoothed, box_size)
+
+    x_gradient_smoothed = np.gradient(x_gradient_smoothed)
+    y_gradient_smoothed = np.gradient(y_gradient_smoothed)
+    z_gradient_smoothed = np.gradient(z_gradient_smoothed)
+
+    return np.column_stack([x_gradient_smoothed, y_gradient_smoothed, z_gradient_smoothed]), resampled_quality

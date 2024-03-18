@@ -1,14 +1,9 @@
-import numpy as np
-import pandas as pd
 import argparse
-import os
-import re
-import face_recognition
 from synchronization_utils import log_table_columns
 
 from FaceMovementExtractor import FaceMovementExtractor
 from Synchronizer import Synchronizer
-    
+import os
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Process directories for Realsense and Wisci data.")
@@ -23,7 +18,7 @@ if __name__ == "__main__":
         output_folder=args.output_folder, 
         mediapipe_face_model_file='/home/mpicek/Downloads/face_landmarker.task', 
         patient_image_path="/home/mpicek/repos/master_project/data_synchronization/patient.png", 
-        log_table_path="/home/mpicek/repos/master_project/processed2/table.csv", 
+        log_table_path=os.path.join(args.output_folder, 'table.csv'), 
         visualize=True
     )
 
@@ -32,8 +27,9 @@ if __name__ == "__main__":
     synchronizer = Synchronizer(
         wisci_server_path=args.wisci_server_path, 
         output_folder=args.output_folder, 
-        log_table_path="/home/mpicek/repos/master_project/processed2/table.csv", 
-        visualize=True
+        log_table_path=os.path.join(args.output_folder, 'table.csv'),
+        box_size=40,
+        visualize=False
     )
 
-    synchronizer.synchronize_realsense_between_all_relevant_wisci_files()
+    synchronizer.process_all_realsense_recordings()
