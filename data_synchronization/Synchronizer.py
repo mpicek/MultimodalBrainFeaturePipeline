@@ -7,6 +7,7 @@ from scipy import signal
 from scipy.signal import find_peaks
 from synchronization_utils import preprocess_accelerometer_data, preprocess_video_signals
 from accelerometer import get_accelerometer_data, GettingAccelerometerDataFailed
+import traceback
 
 class Synchronizer:
     """
@@ -154,7 +155,7 @@ class Synchronizer:
 
             except Exception as e:
                 print(e)
-                self.log_table.at[index, 'unknown_error_synchronization'] = str(e)
+                self.log_table.at[index, 'unknown_error_synchronization'] = traceback.format_exc()
                 self.log_table.at[index, 'synchronization_failed'] = 1
                 self.log_table.to_csv(self.log_table_path, index=False)
 

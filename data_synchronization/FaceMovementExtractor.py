@@ -12,6 +12,7 @@ import mediapipe as mp
 from IPython.display import clear_output
 from synchronization_utils import get_face_coordinate_system, get_forehead_point, recognize_patient, NoFaceDetectedException, smooth
 from mediapipe_utils import *
+import traceback
 
 class Exception5000(Exception):
     pass
@@ -165,7 +166,7 @@ class FaceMovementExtractor:
             log_row['Exception5000'] = [1]
             log_row['failed'] = [1]
         except Exception as e:
-            log_row['unknown_error_extraction'] = [str(e)]
+            log_row['unknown_error_extraction'] = [traceback.format_exc()]
             log_row['failed'] = [1]
 
         return log_row
@@ -395,10 +396,11 @@ class FaceMovementExtractor:
 
             if frame_nb > 100 and visualize:
                 ax.cla()
-                indices = np.arange(len(forehead_points))
-                x = smooth(np.gradient(np.array(forehead_points)[:, 0]), 20)
-                y = smooth(np.gradient(np.array(forehead_points)[:, 1]), 20)
-                z = smooth(np.gradient(np.array(forehead_points)[:, 2]), 20)
+                as_array = np.array(forehead_points)
+                x = smooth(np.gradient(as_array[:, 0]), 20)
+                y = smooth(np.gradient(as_array[:, 1]), 20)
+                z = smooth(np.gradient(as_array[:, 2]), 20)
+                indices = np.arange(len(x))
                 # add name of the plot
                 ax.set_title('First derivative of the forehead points (=velocity)')
                 ax.plot(indices, x, label='x')
