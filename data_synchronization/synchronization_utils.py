@@ -9,6 +9,7 @@ log_table_columns = [
         # the following are for the extraction
         'path_bag',
         'output_path',
+        'sync_strategy', # acc, 
         'failed',
         'date',
         'avg_quality',
@@ -265,3 +266,43 @@ def preprocess_video_signals(forehead_points, quality, cam2face, original_time, 
     z_gradient_smoothed = np.gradient(z_gradient_smoothed)
 
     return np.column_stack([x_gradient_smoothed, y_gradient_smoothed, z_gradient_smoothed]), resampled_quality
+
+def find_data_in_wisci(mat, looked_for, looked_for2=None):
+    """
+    Find data in the given mat file based on the provided criteria.
+
+    Parameters:
+    mat (dict): The mat file containing the data.
+    looked_for (str): The string to look for in the channel names.
+    looked_for2 (str, optional): An additional string to look for in the channel names.
+
+    Returns:
+    tuple: A tuple containing the stream number and index of the found data. If not found, raises a ValueError.
+
+    Raises:
+    ValueError: If the data specified by `looked_for` is not found in the mat file.
+    """
+
+    # Iterate over the stream numbers
+    for stream_nb in mat['STREAMS'].dtype.names: 
+        print(stream_nb)
+
+        # Iterate over the info types
+        for info_type in mat['STREAMS'][stream_nb][0][0].dtype.names:
+            print(f"\t {info_type}")
+            
+            # Check if the info type is 'ch_names'
+            if info_type == 'ch_names':
+                print(mat['STREAMS'][stream_nb][0][0][info_type][0][0])
+                
+                # Iterate over the channel names
+                for i, ch_name in enumerate(mat['STREAMS'][stream_nb][0][0][info_type][0][0]):
+                    print(ch_name)
+                    
+                    # Check if the looked_for or looked_for2 strings are present in the channel name
+                    if looked_for.lower() in ch_name.lower() or (looked_for2 and looked_for2.lower() in ch_name.lower()):
+                        print(f"Found {looked_for} in {ch_name}")
+                        return stream_nb, i
+
+    raise ValueError(f"Data {looked_for} not found in the mat file.")
+

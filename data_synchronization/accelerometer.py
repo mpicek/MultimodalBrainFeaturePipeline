@@ -2,6 +2,7 @@ import pandas as pd
 import scipy.io
 import numpy as np
 from scipy.signal import resample
+from synchronization_utils import find_data_in_wisci
 
 class GettingAccelerometerDataFailed(Exception):
     pass
@@ -32,7 +33,10 @@ def get_accelerometer_data(mat_file):
     """
     
     mat = scipy.io.loadmat(mat_file)
-    data_acc = mat['STREAMS']['Signal_stream_1'][0][0][0][0][0][:,:,0].T
+
+    acc_stream, _ = find_data_in_wisci(mat, 'raccx')
+
+    data_acc = mat['STREAMS'][acc_stream][0][0]['data'][0][0][:,:,0].T
     df = pd.DataFrame(data_acc, columns=['x', 'y', 'z'])
     oversampled = df.interpolate(method='linear', axis=0).bfill()
 
