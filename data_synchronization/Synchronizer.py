@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from scipy import signal
 from scipy.signal import find_peaks
 from synchronization_utils import preprocess_accelerometer_data, preprocess_video_signals
+from SyncLogger import SyncLogger
 from accelerometer import get_accelerometer_data, GettingAccelerometerDataFailed
 import traceback
 
@@ -37,7 +38,7 @@ class Synchronizer:
         self.output_folder = output_folder
         self.log_table_path = log_table_path
         # read the csv table
-        self.log_table = pd.read_csv(log_table_path)
+        self.log = SyncLogger(log_table_path)
         self.box_size = box_size
         self.visualize = visualize
 
@@ -62,7 +63,7 @@ class Synchronizer:
         
         return best_corr, best_lag, best_freq, best_total_peaks, best_second_largest_corr_peak
     
-    def sync_with_best_wisci_file(self, possible_wisci_files, log_table_index, log_table_row):
+    def sync_with_best_wisci_file(self, possible_wisci_files, path_bag):
         best_corr_per_wisci_file = []
         best_lag_per_wisci_file = []
         best_freq_per_wisci_file = []
@@ -75,10 +76,11 @@ class Synchronizer:
             accelerometer_data = preprocess_accelerometer_data(data_acc, self.box_size)
 
             # open the relevant files
-            forehead_points = np.load(os.path.join(log_table_row['output_path'], 'forehead_points.npy'))
-            quality = np.load(os.path.join(log_table_row['output_path'], 'quality.npy'))
-            cam2face = np.load(os.path.join(log_table_row['output_path'], 'cam2face.npy'))
-            duration = np.load(os.path.join(log_table_row['output_path'], 'duration.npy'))
+            output_path = self.log.get_value(path_bag, 'output_path')
+            forehead_points = np.load(os.path.join(output_path, 'forehead_points.npy'))
+            quality = np.load(os.path.join(output_path, 'quality.npy'))
+            cam2face = np.load(os.path.join(output_path, 'cam2face.npy'))
+            duration = np.load(os.path.join(output_path, 'duration.npy'))
 
             if len(forehead_points) > len(accelerometer_data):
                 # I suppose that the whole realsense recording has to be in the wisci recording
@@ -104,17 +106,17 @@ class Synchronizer:
         freq = best_freq_per_wisci_file[index_of_best_wisci_file]
         index_of_second_best_wisci_file = np.argsort(best_corr_per_wisci_file)[-2]
 
-        self.log_table.at[log_table_index, 'path_wisci'] = possible_wisci_files[index_of_best_wisci_file]
-        self.log_table.at[log_table_index, 'normalized_corr'] = max_corr
-        self.log_table.at[log_table_index, 'lag'] = lag
-        self.log_table.at[log_table_index, 'fps_bag'] = freq
-        self.log_table.at[log_table_index, 'peaks_per_million'] = best_total_peaks_per_wisci_file[index_of_best_wisci_file]/len(accelerometer_data) * 1000000
-        self.log_table.at[log_table_index, 'best_second_largest_corr_peak'] = best_second_largest_corr_peak_per_wisci_file[index_of_best_wisci_file]
-        self.log_table.at[log_table_index, 'second_best_wisci_corr'] = best_corr_per_wisci_file[index_of_second_best_wisci_file]
-        self.log_table.at[log_table_index, 'second_best_wisci_peaks_per_million'] = best_total_peaks_per_wisci_file[index_of_second_best_wisci_file]/len(accelerometer_data) * 1000000
-        self.log_table.at[log_table_index, 'second_best_wisci_path'] = possible_wisci_files[index_of_second_best_wisci_file]
-        self.log_table.at[log_table_index, 'synchronization_failed'] = 0
-        self.log_table.to_csv(self.log_table_path, index=False)
+        self.log.update_log(path_bag, 'path_wisci', possible_wisci_files[index_of_best_wisci_file])
+        self.log.update_log(path_bag, 'normalized_corr', max_corr)
+        self.log.update_log(path_bag, 'lag', lag)
+        self.log.update_log(path_bag, 'fps_bag', freq)
+        self.log.update_log(path_bag, 'peaks_per_million', best_total_peaks_per_wisci_file[index_of_best_wisci_file]/len(accelerometer_data) * 1000000)
+        self.log.update_log(path_bag, 'best_second_largest_corr_peak', best_second_largest_corr_peak_per_wisci_file[index_of_best_wisci_file])
+        self.log.update_log(path_bag, 'second_best_wisci_corr', best_corr_per_wisci_file[index_of_second_best_wisci_file])
+        self.log.update_log(path_bag, 'second_best_wisci_peaks_per_million', best_total_peaks_per_wisci_file[index_of_second_best_wisci_file]/len(accelerometer_data) * 1000000)
+        self.log.update_log(path_bag, 'second_best_wisci_path', possible_wisci_files[index_of_second_best_wisci_file])
+        self.log.update_log(path_bag, 'synchronization_failed', 0)
+        self.log.save_to_csv()
 
     def process_all_realsense_recordings(self):
         """
@@ -126,10 +128,11 @@ class Synchronizer:
         """
 
         # iterate over rows in the log table (aka over all bag files we want to synchronize)
-        for index, row in self.log_table.iterrows():
+        for index, row in self.log.log_df.iterrows():
+            current_bag_path = row['path_bag']
             try:
-                print(f"{index + 1}/{len(list(self.log_table.iterrows()))}: Bag being processed: {row['path_bag']}")
-                if row['failed'] == 1:
+                print(f"{index + 1}/{len(list(self.log.log_df.iterrows()))}: Bag being processed: {row['path_bag']}")
+                if row['acc_extraction_failed'] == 1:
                     print("There was an error in extraction, skipping synchronization.")
                     continue
                 # if the columns 'path_wisci' has no value means it has already been synchronized
@@ -139,25 +142,25 @@ class Synchronizer:
                     continue
 
                 possible_wisci_files = self.find_relevant_wisci_files(row['date'])
-                self.log_table.at[index, 'relevant_wisci_files'] = "TODO" # TODO: the cell has to be non-empty in order to write there a list of values
-                self.log_table.at[index, 'relevant_wisci_files'] = possible_wisci_files
-                self.log_table.to_csv(self.log_table_path, index=False)
-            
-                self.sync_with_best_wisci_file(possible_wisci_files, index, row)
 
-                if index == 0:
-                    self.visualize_synchronized(row['path_bag'])
+                self.log.update_log(current_bag_path, 'relevant_wisci_files', "TODO") # TODO: the cell has to be non-empty in order to write there a list of values
+                self.log.update_log(current_bag_path, 'relevant_wisci_files', possible_wisci_files)
+            
+                self.sync_with_best_wisci_file(possible_wisci_files, current_bag_path)
+
+                # if index == 0:
+                    # self.visualize_synchronized(row['path_bag'])
             
             except GettingAccelerometerDataFailed as e:
-                self.log_table.at[index, 'unknown_error_synchronization'] = "GettingAccelerometerDataFailed"
-                self.log_table.at[index, 'synchronization_failed'] = 1
-                self.log_table.to_csv(self.log_table_path, index=False)
+                self.log.update_log(current_bag_path, 'unknown_error_synchronization', "GettingAccelerometerDataFailed")
+                self.log.update_log(current_bag_path, 'synchronization_failed', 1)
 
             except Exception as e:
                 print(e)
-                self.log_table.at[index, 'unknown_error_synchronization'] = traceback.format_exc()
-                self.log_table.at[index, 'synchronization_failed'] = 1
-                self.log_table.to_csv(self.log_table_path, index=False)
+                self.log.update_log(current_bag_path, 'unknown_error_synchronization', traceback.format_exc())
+                self.log.update_log(current_bag_path, 'synchronization_failed', 1)
+            finally:
+                self.log.save_to_csv()
 
 
     def find_relevant_wisci_files(self, date):
@@ -210,19 +213,17 @@ class Synchronizer:
     
     def visualize_synchronized(self, path_bag):
         # get the row from the log table
-        row = self.log_table[self.log_table['path_bag'] == path_bag]
-        if len(row) == 0:
-            print("No such path in the log table.")
-            return
-        row = row.iloc[0]
+
+        output_path = self.log.get_value(path_bag, 'output_path')
         # load the data
-        data_acc = get_accelerometer_data(row['path_wisci'])
+        data_acc = get_accelerometer_data(self.log.get_value(path_bag, 'path_wisci'))
         accelerometer_data = preprocess_accelerometer_data(data_acc, self.box_size)
-        forehead_points = np.load(os.path.join(row['output_path'], 'forehead_points.npy'))
-        quality = np.load(os.path.join(row['output_path'], 'quality.npy'))
-        cam2face = np.load(os.path.join(row['output_path'], 'cam2face.npy'))
-        duration = np.load(os.path.join(row['output_path'], 'duration.npy'))
-        video_gradient_smoothed, quality_resampled = preprocess_video_signals(forehead_points, quality, cam2face, duration, row['fps_bag'], box_size=self.box_size)
+        forehead_points = np.load(os.path.join(output_path, 'forehead_points.npy'))
+        quality = np.load(os.path.join(output_path, 'quality.npy'))
+        quality = np.load(os.path.join(output_path, 'quality.npy'))
+        cam2face = np.load(os.path.join(output_path, 'cam2face.npy'))
+        duration = np.load(os.path.join(output_path, 'duration.npy'))
+        video_gradient_smoothed, quality_resampled = preprocess_video_signals(forehead_points, quality, cam2face, duration, self.log.get_value(path_bag, 'fps_bag'), box_size=self.box_size)
         corr, lag, _, second_largest_corr_peak = self.sync_wisci_and_video(accelerometer_data, video_gradient_smoothed, quality_resampled, overwrite_visualization=True)
     
     def sync_wisci_and_video(self, accelerometer_data, video, quality, overwrite_visualization=False):

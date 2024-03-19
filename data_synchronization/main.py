@@ -1,5 +1,4 @@
 import argparse
-from synchronization_utils import log_table_columns
 
 from FaceMovementExtractor import FaceMovementExtractor
 from Synchronizer import Synchronizer

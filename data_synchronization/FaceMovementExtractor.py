@@ -3,7 +3,6 @@ import pandas as pd
 import os
 import re
 import face_recognition
-from synchronization_utils import log_table_columns
 import scipy.io
 import pyrealsense2 as rs
 import cv2
@@ -11,6 +10,7 @@ import matplotlib.pyplot as plt
 import mediapipe as mp
 from IPython.display import clear_output
 from synchronization_utils import get_face_coordinate_system, get_forehead_point, recognize_patient, NoFaceDetectedException, smooth
+from SyncLogger import SyncLogger
 from mediapipe_utils import *
 import traceback
 
@@ -32,7 +32,6 @@ class FaceMovementExtractor:
     Methods:
         process_directories(): Processes directories containing .bag files, extracts relevant data, and logs the process.
         _realsense_day_extract(folder_name): Extracts the date from a Realsense folder name.
-        _append_row_and_save(new_row_df): Appends a new row to the log table and saves it.
         process_bag_and_save(path_bag, output_file_path): Processes a .bag file, saves extracted data, and logs the process.
     """
     def __init__(self, realsense_server_path, output_folder, mediapipe_face_model_file, patient_image_path, log_table_path, visualize=False):
@@ -43,6 +42,7 @@ class FaceMovementExtractor:
         self.realsense_server_path = realsense_server_path
         self.output_folder = output_folder
         self.log_table_path = log_table_path
+        self.log = SyncLogger(self.log_table_path)
         self.visualize = visualize
 
     def process_directories(self):
@@ -84,12 +84,10 @@ class FaceMovementExtractor:
                     path_bag = os.path.join(root, file) # full path to the file
                     print(f"Processing {path_bag} and saving to {output_file_path}")
 
-                    log_table = self.process_bag_and_save(path_bag, output_file_path)
-                    log_table['date'] = [date]
+                    self.process_bag_and_save(path_bag, output_file_path)
+                    self.log.update_log(path_bag, 'date', date)
+                    self.log.save_to_csv()
 
-                    self._append_row_and_save(log_table)
-
-    
     def _realsense_day_extract(self, folder_name):
         """
         Extracts the date from a Realsense folder name, searching anywhere in the string.
@@ -107,29 +105,6 @@ class FaceMovementExtractor:
         else:
             return None
 
-    def _append_row_and_save(self, new_row_df):
-        """
-        Appends a new row to the log table and saves it. Creates a new log table if it doesn't exist.
-
-        Parameters:
-            new_row_df (pandas.DataFrame): DataFrame containing a single row to be appended to the log table.
-        """
-        
-        # Check if the CSV file exists
-        if os.path.exists(self.log_table_path):
-            # If the file exists, load the existing DataFrame, but only the header to get column names
-            header_df = pd.read_csv(self.log_table_path, nrows=0)
-            
-            # Ensure the new row has the same columns as the existing CSV, in the same order
-            # This step is crucial to avoid misalignment issues
-            new_row_df = new_row_df.reindex(columns=header_df.columns)
-            
-            # Append the new row DataFrame to the CSV file without writing the header again
-            new_row_df.to_csv(self.log_table_path, mode='a', header=False, index=False)
-        else:
-            # If the file does not exist, save the new DataFrame as the CSV file with a header
-            new_row_df.to_csv(self.log_table_path, index=False)
-
 
     def process_bag_and_save(self, path_bag, output_file_path):
         """
@@ -139,22 +114,17 @@ class FaceMovementExtractor:
         - path_bag (str): Path to the bag file to be processed.
         - output_file_path (str): Directory path where output files will be saved.
 
-        Returns:
-        - log_row (DataFrame): A pandas DataFrame containing the log of the operation (one row), 
-                               including paths, success/failure, and any errors encountered.
-
         The function attempts to extract facial vectors from the specified bag file using the provided MediaPipe face model and patient encodings. 
         It logs the process, including whether it succeeded or failed, and saves the extracted data to the specified output path. 
         In case of exceptions, it logs the error and marks the operation as failed.
         """
 
-        log_row = pd.DataFrame(columns=log_table_columns)
-        log_row['path_bag'] = [path_bag]
-        log_row['output_path'] = [output_file_path]
+        self.log.process_new_file(path_bag)
+        self.log.update_log(path_bag, 'output_path', output_file_path)
 
         try:
-            forehead_points, quality_data, face2cam, cam2face, face_coordinates_origin, duration, log_row = self.extract_face_vector(path_bag, log_row=log_row, visualize=self.visualize)
-            log_row['failed'] = [0]
+            forehead_points, quality_data, face2cam, cam2face, face_coordinates_origin, duration = self.extract_face_vector(path_bag, visualize=self.visualize)
+            self.log.update_log(path_bag, 'acc_extraction_failed', 0)
             os.makedirs(output_file_path, exist_ok=True)
             np.save(os.path.join(output_file_path, 'forehead_points.npy'), forehead_points)
             np.save(os.path.join(output_file_path, 'quality.npy'), quality_data)
@@ -163,15 +133,14 @@ class FaceMovementExtractor:
             np.save(os.path.join(output_file_path, 'face_coordinates_origin.npy'), face_coordinates_origin)
             np.save(os.path.join(output_file_path, 'duration.npy'), duration)
         except Exception5000:
-            log_row['Exception5000'] = [1]
-            log_row['failed'] = [1]
+            self.log.update_log(path_bag, 'Exception5000', 1)
+            self.log.update_log(path_bag, 'acc_extraction_failed', 1)
         except Exception as e:
-            log_row['unknown_error_extraction'] = [traceback.format_exc()]
-            log_row['failed'] = [1]
+            self.log.update_log(path_bag, 'unknown_error_extraction', [traceback.format_exc()])
+            self.log.update_log(path_bag, 'acc_extraction_failed', 1)
 
-        return log_row
-    
-    def extract_face_vector(self, path_bag, log_row, visualize=False):
+
+    def extract_face_vector(self, path_bag, visualize=False):
         """
         Extracts a vector representing face movement over time from a realsense .bag file.
 
@@ -324,9 +293,9 @@ class FaceMovementExtractor:
                     top, right, bottom, left = face_location
                     face_height = bottom - top
                     face_width = right - left
-                    log_row['first_frame_face_detected'] = [color_image_rs.copy()]
-                    log_row['face_location'] = [face_location]
-                    log_row['face_patient_distance'] = [distance]
+                    self.log.update_log(path_bag, 'first_frame_face_detected', color_image_rs.copy())
+                    self.log.update_log(path_bag, 'face_location', face_location)
+                    self.log.update_log(path_bag, 'face_patient_distance', distance)
                 except NoFaceDetectedException:
                     forehead_points.append(np.array([0, 0, 0]))
                     quality.append(0)
@@ -420,7 +389,7 @@ class FaceMovementExtractor:
         forehead_points[:non_zero_index] = forehead_points[non_zero_index]
 
         quality = np.stack(quality)
-        log_row['avg_quality'] = [quality.mean()]
+        self.log.update_log(path_bag, 'avg_quality', quality.mean())
 
         
-        return forehead_points, quality, face2cam, cam2face, face_coordinates_origin, duration/1000, log_row
+        return forehead_points, quality, face2cam, cam2face, face_coordinates_origin, duration/1000

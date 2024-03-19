@@ -5,34 +5,6 @@ import cv2
 from scipy.signal import resample
 import plotly.graph_objects as go
 
-log_table_columns = [
-        # the following are for the extraction
-        'path_bag',
-        'output_path',
-        'sync_strategy', # acc, 
-        'failed',
-        'date',
-        'avg_quality',
-        'first_frame_face_detected',
-        'face_location',
-        'face_patient_distance',
-        'Exception5000',
-        'unknown_error_extraction',
-        'relevant_wisci_files',
-        # and these are for the synchronization
-        'path_wisci',
-        'normalized_corr',
-        'lag',
-        'fps_bag',
-        'unknown_error_synchronization',
-        'peaks_per_million',
-        'best_second_largest_corr_peak',
-        'second_best_wisci_corr',
-        'second_best_wisci_peaks_per_million',
-        'second_best_wisci_path',
-        'synchronization_failed',
-    ]
-
 def get_face_coordinate_system(detection_result, color_image):
     """
     Establishes a face coordinate system based on detected facial landmarks.
@@ -285,23 +257,18 @@ def find_data_in_wisci(mat, looked_for, looked_for2=None):
 
     # Iterate over the stream numbers
     for stream_nb in mat['STREAMS'].dtype.names: 
-        print(stream_nb)
 
         # Iterate over the info types
         for info_type in mat['STREAMS'][stream_nb][0][0].dtype.names:
-            print(f"\t {info_type}")
             
             # Check if the info type is 'ch_names'
             if info_type == 'ch_names':
-                print(mat['STREAMS'][stream_nb][0][0][info_type][0][0])
                 
                 # Iterate over the channel names
                 for i, ch_name in enumerate(mat['STREAMS'][stream_nb][0][0][info_type][0][0]):
-                    print(ch_name)
                     
                     # Check if the looked_for or looked_for2 strings are present in the channel name
                     if looked_for.lower() in ch_name.lower() or (looked_for2 and looked_for2.lower() in ch_name.lower()):
-                        print(f"Found {looked_for} in {ch_name}")
                         return stream_nb, i
 
     raise ValueError(f"Data {looked_for} not found in the mat file.")
