@@ -19,10 +19,10 @@ class Synchronizer:
         output_folder (str): Directory path where synchronized data will be saved.
         log_table_path (str): Path to the CSV log table.
         log_table (pandas.DataFrame): DataFrame loaded from the CSV log table.
-        box_size (int): Size of the box for smoothing the accelerometer data.
+        sigma (int): Sigma of the Gaussian filter for smoothing.
         visualize (bool): Flag to enable or disable visualization of the synchronization process.
     """
-    def __init__(self, wisci_server_path, output_folder, log_table_path, box_size, visualize=False):
+    def __init__(self, wisci_server_path, output_folder, log_table_path, sigma, visualize=False):
         """
         Initializes the Synchronizer with paths and settings for data synchronization.
 
@@ -30,7 +30,7 @@ class Synchronizer:
             wisci_server_path (str): Path to the directory containing WiSci data.
             output_folder (str): Path to the directory where output data will be saved.
             log_table_path (str): Path to the CSV file used as a log table.
-            box_size (int): Size of the box for smoothing the accelerometer data.
+            sigma (int): Sigma of the Gaussian filter for smoothing.
             visualize (bool, optional): If True, enables visualization of the process. Defaults to False.
         """
 
@@ -39,20 +39,20 @@ class Synchronizer:
         self.log_table_path = log_table_path
         # read the csv table
         self.log = SyncLogger(log_table_path)
-        self.box_size = box_size
+        self.sigma = sigma
         self.visualize = visualize
 
     def sync_and_optimize_freq(self, accelerometer_data, forehead_points, quality, cam2face, duration):
         # trying different frequencies as wisci and realsense are both imprecise in their sampling
         # frequencies so I adjust it like this - we find the freq that gets the best result :)
-        freqs = np.linspace(29.3, 30.5, 50)
+        freqs = np.linspace(29.5, 30.2, 100)
         best_corr = -1
         best_lag = 0
         best_freq = freqs[0]
         best_total_peaks = 0
         best_second_largest_corr_peak = 0
         for freq in freqs:
-            video_gradient_smoothed, quality_resampled = preprocess_video_signals(forehead_points, quality, cam2face, duration, freq, box_size=self.box_size)
+            video_gradient_smoothed, quality_resampled = preprocess_video_signals(forehead_points, quality, cam2face, duration, freq, sigma=self.sigma)
             corr, lag, total_peaks, second_largest_corr_peak = self.sync_wisci_and_video(accelerometer_data, video_gradient_smoothed, quality_resampled)
             if corr > best_corr:
                 best_corr = corr
@@ -73,7 +73,7 @@ class Synchronizer:
         # go over wisci files
         for wisci_file in possible_wisci_files:
             data_acc = get_accelerometer_data(wisci_file) # can throw exception that will propagate up
-            accelerometer_data = preprocess_accelerometer_data(data_acc, self.box_size)
+            accelerometer_data = preprocess_accelerometer_data(data_acc, self.sigma)
 
             # open the relevant files
             output_path = self.log.get_value(path_bag, 'output_path')
@@ -217,13 +217,13 @@ class Synchronizer:
         output_path = self.log.get_value(path_bag, 'output_path')
         # load the data
         data_acc = get_accelerometer_data(self.log.get_value(path_bag, 'path_wisci'))
-        accelerometer_data = preprocess_accelerometer_data(data_acc, self.box_size)
+        accelerometer_data = preprocess_accelerometer_data(data_acc, self.sigma)
         forehead_points = np.load(os.path.join(output_path, 'forehead_points.npy'))
         quality = np.load(os.path.join(output_path, 'quality.npy'))
         quality = np.load(os.path.join(output_path, 'quality.npy'))
         cam2face = np.load(os.path.join(output_path, 'cam2face.npy'))
         duration = np.load(os.path.join(output_path, 'duration.npy'))
-        video_gradient_smoothed, quality_resampled = preprocess_video_signals(forehead_points, quality, cam2face, duration, self.log.get_value(path_bag, 'fps_bag'), box_size=self.box_size)
+        video_gradient_smoothed, quality_resampled = preprocess_video_signals(forehead_points, quality, cam2face, duration, self.log.get_value(path_bag, 'fps_bag'), sigma=self.sigma)
         corr, lag, _, second_largest_corr_peak = self.sync_wisci_and_video(accelerometer_data, video_gradient_smoothed, quality_resampled, overwrite_visualization=True)
     
     def sync_wisci_and_video(self, accelerometer_data, video, quality, overwrite_visualization=False):
@@ -243,9 +243,7 @@ class Synchronizer:
 
                 sig1 = normalized_sig1
                 sig2 = normalized_sig2
-                cut_by_smoothing_beginning = (self.box_size - 1)//2
-                cut_by_smoothing_end = -(self.box_size - 1)//2
-                sig2 = sig2 * quality[cut_by_smoothing_beginning:cut_by_smoothing_end][cut_by_smoothing_beginning:cut_by_smoothing_end][cut_by_smoothing_beginning:cut_by_smoothing_end]
+                sig2 = sig2 * quality
 
                 # we use "valid" because we suppose that the realsense video is whole in the wisci recording (not just a part of it)
                 correlation = signal.correlate(sig1, sig2, mode="valid")

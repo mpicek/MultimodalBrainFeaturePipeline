@@ -4,6 +4,7 @@ import face_recognition
 import cv2
 from scipy.signal import resample
 import plotly.graph_objects as go
+from scipy.ndimage import gaussian_filter
 
 def get_face_coordinate_system(detection_result, color_image):
     """
@@ -129,10 +130,8 @@ def recognize_patient(color_image, patients_encoding):
 
     return patients_face_location, np.argmin(face_distances)
 
-def smooth(y, box_pts):
-    box = np.ones(box_pts)/box_pts
-    y_smooth = np.convolve(y, box, mode='valid')
-    return y_smooth
+def smooth(y, sigma):
+    return gaussian_filter(y, sigma)
 
 def rotation_x_axis_counterclws(angle):
     """
@@ -167,22 +166,22 @@ def rotation_z_axis_counterclws(angle):
             [0, 0, 1]
         ])
 
-def preprocess_accelerometer_data(data, box_size):
+def preprocess_accelerometer_data(data, sigma):
 
-    x_acc = smooth(data[:, 0], box_size)
-    y_acc = smooth(data[:, 1], box_size)
-    z_acc = smooth(data[:, 2], box_size)
+    x_acc = smooth(data[:, 0], sigma)
+    y_acc = smooth(data[:, 1], sigma)
+    z_acc = smooth(data[:, 2], sigma)
     x_acc = np.gradient(x_acc)
     y_acc = np.gradient(y_acc)
     z_acc = np.gradient(z_acc)
 
-    x_acc = smooth(x_acc, box_size)
-    y_acc = smooth(y_acc, box_size)
-    z_acc = smooth(z_acc, box_size)
+    x_acc = smooth(x_acc, sigma)
+    y_acc = smooth(y_acc, sigma)
+    z_acc = smooth(z_acc, sigma)
 
     return np.column_stack([x_acc, y_acc, z_acc])
 
-def preprocess_video_signals(forehead_points, quality, cam2face, original_time, desired_realsense_fps, box_size):
+def preprocess_video_signals(forehead_points, quality, cam2face, original_time, desired_realsense_fps, sigma):
 
     face2cam = np.linalg.inv(cam2face)
 
@@ -213,25 +212,25 @@ def preprocess_video_signals(forehead_points, quality, cam2face, original_time, 
 
     resampled_quality = resample(quality, new_num_samples)
 
-    x_smoothed = smooth(resampled_signal[:, 0], box_size)
-    y_smoothed = smooth(resampled_signal[:, 1], box_size)
-    z_smoothed = smooth(resampled_signal[:, 2], box_size)
+    x_smoothed = smooth(resampled_signal[:, 0], sigma)
+    y_smoothed = smooth(resampled_signal[:, 1], sigma)
+    z_smoothed = smooth(resampled_signal[:, 2], sigma)
 
     x_gradient = np.gradient(x_smoothed)
     y_gradient = np.gradient(y_smoothed)
     z_gradient = np.gradient(z_smoothed)
 
-    x_gradient_smoothed = smooth(x_gradient, box_size)
-    y_gradient_smoothed = smooth(y_gradient, box_size)
-    z_gradient_smoothed = smooth(z_gradient, box_size)
+    x_gradient_smoothed = smooth(x_gradient, sigma)
+    y_gradient_smoothed = smooth(y_gradient, sigma)
+    z_gradient_smoothed = smooth(z_gradient, sigma)
 
     x_gradient_smoothed = np.gradient(x_gradient_smoothed)
     y_gradient_smoothed = np.gradient(y_gradient_smoothed)
     z_gradient_smoothed = np.gradient(z_gradient_smoothed)
 
-    x_gradient_smoothed = smooth(x_gradient_smoothed, box_size)
-    y_gradient_smoothed = smooth(y_gradient_smoothed, box_size)
-    z_gradient_smoothed = smooth(z_gradient_smoothed, box_size)
+    x_gradient_smoothed = smooth(x_gradient_smoothed, sigma)
+    y_gradient_smoothed = smooth(y_gradient_smoothed, sigma)
+    z_gradient_smoothed = smooth(z_gradient_smoothed, sigma)
 
     x_gradient_smoothed = np.gradient(x_gradient_smoothed)
     y_gradient_smoothed = np.gradient(y_gradient_smoothed)
