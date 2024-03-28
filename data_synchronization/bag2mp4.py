@@ -45,22 +45,28 @@ def create_videos_from_bag(path_bag, output_folder):
     img_height = 480
     img_width = 640
 
-    pipeline = rs.pipeline()
-    config = rs.config()
-    rs.config.enable_device_from_file(config, path_bag)
+    try:
 
-    config.enable_stream(rs.stream.depth, img_width, img_height, rs.format.z16, 30)
-    config.enable_stream(rs.stream.color, img_width, img_height, rs.format.bgr8, 30)
+        pipeline = rs.pipeline()
+        config = rs.config()
+        rs.config.enable_device_from_file(config, path_bag)
 
-    profile = pipeline.start(config)
-    playback = profile.get_device().as_playback()
+        config.enable_stream(rs.stream.depth, img_width, img_height, rs.format.z16, 30)
+        config.enable_stream(rs.stream.color, img_width, img_height, rs.format.bgr8, 30)
+
+        profile = pipeline.start(config)
+        playback = profile.get_device().as_playback()
+        playback.set_real_time(True)
+        duration = playback.get_duration().total_seconds() * 1000
+        print(f"Overall video duration: {playback.get_duration()}")
+    except Exception as e:
+        return 0, str(e), 0
     
     # we want to set_real_time to False, so that we can process the frames as slowly as necessary.
     # However, there are errors reading it at the beginning and at the end (hopefully not in the middle)
     # when we set it to False right at the beginning. Therefore, we set it to True at the beginning 
     # and then to False after the first frame is read. The end is handled differently - with reading the frames
     # up to the duration of the video - 1s (to be sure that we don't miss the last frame)
-    playback.set_real_time(True)
 
     first_frame = True
     prev_ts = -1
@@ -72,8 +78,6 @@ def create_videos_from_bag(path_bag, output_folder):
     ts = 0
     time_series = []
     frames_list = []
-    duration = playback.get_duration().total_seconds() * 1000
-    print(f"Overall video duration: {playback.get_duration()}")
     video_counter = 0
     failed = False
     # playback.seek(datetime.timedelta(seconds=73*4))
@@ -248,9 +252,6 @@ def bag_folder2mp4(bag_folder, output_folder, log_table_path):
     log_df.to_csv(log_table_path, index=False)
     print(f"Log table saved to {log_table_path}")
 
-# path_bag = '/home/mpicek/repos/master_project/test_data/corresponding/bags/2023_11_13/realsense/cam0_911222060374_record_13_11_2023_1337_20.bag'
-# output_folder = '/home/mpicek/repos/master_project/test_data/corresponding/bags/2023_11_13/realsense/'
-# path_bag = '/data/bags/cam0_916512060805_record_04_10_2023_1354_32.bag'
 
 path_bag = '/data/bags/cam0_916512060805_record_04_10_2023_1341_07.bag'
 output_folder = '/data/bags/'
@@ -266,7 +267,9 @@ def main():
     # if we want to process just one file (in that case args.bag_folder has to be a path to the file)
     # failed = bag2mp4(args.bag_folder, args.output_folder)
     # print(failed)
+
     bag_folder2mp4(args.bag_folder, args.output_folder, args.log_table_path)
+    # python bag2mp4.py /home/vita-w11/Downloads/bags/ /home/vita-w11/Downloads/bags/output_test /home/vita-w11/Downloads/bags/output_test/log.csv
 
 if __name__ == "__main__":
     main()
