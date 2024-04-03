@@ -10,7 +10,6 @@ import subprocess
 import shutil
 from mediapipe_utils import *
 from synchronization_utils import *
-from tqdm import tqdm
 import argparse
 import pandas as pd
 
@@ -254,7 +253,7 @@ def bag_folder2mp4(bag_folder, output_folder, log_table_path):
     if os.path.exists(log_table_path):
         log_df = pd.read_csv(log_table_path)
     else:
-        log_df = pd.DataFrame(columns=['bag_path', 'failed', 'duration', 'num_frames', 'calculated_duration', 'problematic_frames'])
+        log_df = pd.DataFrame(columns=['bag_path', 'failed', 'duration', 'num_frames', 'calculated_duration', 'problematic_frames', 'mp4_name'])
 
     num_rows = len(log_df)
 
@@ -263,23 +262,36 @@ def bag_folder2mp4(bag_folder, output_folder, log_table_path):
         for file in files:
             if file.endswith('.bag'):
                 bag_path = os.path.join(root, file)
+
+                # Skip the file if it has already been processed (based on only basename, not the full path)
+                # If so, skip the file
+                all_processed_files = log_df['bag_path'].values
+                all_processed_files = [os.path.basename(file) for file in all_processed_files]
+                if os.path.basename(bag_path) in all_processed_files:
+                    print(f"Skipping {bag_path} as it has already been processed.")
+                    continue
+
                 duration, failed, num_frames, problematic_frames = bag2mp4(bag_path, output_folder)
-                log_df.loc[file_counter] = [bag_path, failed, duration, num_frames, num_frames/30, problematic_frames]
+                log_df.loc[file_counter] = [
+                    bag_path,
+                    failed,
+                    duration,
+                    num_frames,
+                    num_frames/30,
+                    problematic_frames,
+                    os.path.basename(bag_path)[:-4] + '.mp4'
+                ]
                 file_counter += 1                
 
-    # Save the log table to CSV
     log_df.to_csv(log_table_path, index=False)
     print(f"Log table saved to {log_table_path}")
 
 
-path_bag = '/data/bags/cam0_916512060805_record_04_10_2023_1341_07.bag'
-output_folder = '/data/bags/'
-
 def main():
     parser = argparse.ArgumentParser(description="Convert bag files to mp4 and log the status.")
-    parser.add_argument("bag_folder", help="Path to the folder containing bag files.")
-    parser.add_argument("output_folder", help="Path to the output folder for mp4 files.")
-    parser.add_argument("log_table_path", help="Path to save the log table as a CSV file.")
+    parser.add_argument("--bag_folder", type=str, help="Path to the folder containing bag files.")
+    parser.add_argument("--output_folder", type=str, help="Path to the output folder for mp4 files.")
+    parser.add_argument("--log_table_path", type=str, help="Path to save the log table as a CSV file.")
     args = parser.parse_args()
 
     ##########################
@@ -289,7 +301,7 @@ def main():
     ##########################
 
     bag_folder2mp4(args.bag_folder, args.output_folder, args.log_table_path)
-    # python bag2mp4.py /home/vita-w11/Downloads/bags/ /home/vita-w11/Downloads/bags/output_test /home/vita-w11/Downloads/bags/output_test/log.csv
+    # python bag2mp4.py --bag_folder /home/vita-w11/Downloads/bags/ --output_folder /home/vita-w11/Downloads/bags/output_test --log_table_path /home/vita-w11/Downloads/bags/output_test/log.csv
 
 if __name__ == "__main__":
     main()
