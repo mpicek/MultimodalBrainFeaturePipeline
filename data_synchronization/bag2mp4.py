@@ -80,6 +80,7 @@ def create_videos_from_bag(path_bag, output_folder):
     frames_list = []
     video_counter = 0
     failed = False
+    problematic_frames = 0
     # playback.seek(datetime.timedelta(seconds=73*4))
     try:
         while True:
@@ -100,6 +101,7 @@ def create_videos_from_bag(path_bag, output_folder):
 
             # skipped frame by RealSense
             if not depth_frame or not color_frame:
+                problematic_frames += 1
                 if len(frames_list) > 0:
                     frames_list.append(frames_list[-1])
                 else:
@@ -149,6 +151,8 @@ def create_videos_from_bag(path_bag, output_folder):
 
             if prev_ts - prev_prev_ts > 2*int(1000/30) - 10:
                 num_of_skipped_frames = (prev_ts - prev_prev_ts) // int(1000/30)
+                problematic_frames += num_of_skipped_frames
+
                 if len(frames_list) > 0:
                     for i in range(num_of_skipped_frames):
                         frames_list.append(frames_list[-1])
@@ -167,6 +171,8 @@ def create_videos_from_bag(path_bag, output_folder):
             if len(time_series) % (30*30) == 0:
                 formatted_number = '{:04d}'.format(video_counter)
                 frames_list = np.stack(frames_list)
+                non_zero_index = np.where((frames_list != np.zeros((480, 640, 3))).any(axis=1))[0][0]
+                frames_list[:non_zero_index] = frames_list[non_zero_index]
                 ffmpegio.video.write(os.path.join(output_folder, formatted_number + '.mp4'), 30, frames_list, show_log=True, loglevel="warning")
                 print(f"{len(time_series) / (30*30) / 2} minutes processed")
                 frames_list = []
@@ -188,7 +194,7 @@ def create_videos_from_bag(path_bag, output_folder):
         pipeline.stop()
         cv2.destroyAllWindows()
     
-    return prev_ts / 1000, failed, len(time_series)
+    return prev_ts / 1000, failed, len(time_series), problematic_frames
 
 
 def bag2mp4(path_bag, output_folder):
@@ -201,7 +207,7 @@ def bag2mp4(path_bag, output_folder):
         shutil.rmtree(tmp_folder)
     os.makedirs(tmp_folder)
 
-    duration, failed, num_frames = create_videos_from_bag(path_bag, tmp_folder)
+    duration, failed, num_frames, problematic_frames = create_videos_from_bag(path_bag, tmp_folder)
     np.save(os.path.join(output_folder, os.path.basename(path_bag)[:-4] + '_duration.npy'), duration)
 
     # List all mp4 files in the current directory alphabetically
@@ -233,19 +239,32 @@ def bag2mp4(path_bag, output_folder):
     if os.path.exists(tmp_folder):
         shutil.rmtree(tmp_folder)
     
-    return duration, failed, num_frames
+    return duration, failed, num_frames, problematic_frames
 
 def bag_folder2mp4(bag_folder, output_folder, log_table_path):
-    # Initialize a DataFrame to log the status
-    log_df = pd.DataFrame(columns=['bag_path', 'failed', 'duration', 'num_frames', 'calculated_duration'])
+    """
+    Convert all .bag files in a given folder to .mp4 files and update a log table (append rows if the table exists).
 
-    file_counter = 0
+    Args:
+        bag_folder (str): The path to the folder containing the .bag files.
+        output_folder (str): The path to the folder where the .mp4 files will be saved.
+        log_table_path (str): The path to the log table CSV file.
+    """
+    
+    if os.path.exists(log_table_path):
+        log_df = pd.read_csv(log_table_path)
+    else:
+        log_df = pd.DataFrame(columns=['bag_path', 'failed', 'duration', 'num_frames', 'calculated_duration', 'problematic_frames'])
+
+    num_rows = len(log_df)
+
+    file_counter = 0 + num_rows
     for root, _, files in os.walk(bag_folder):
         for file in files:
             if file.endswith('.bag'):
                 bag_path = os.path.join(root, file)
-                duration, failed, num_frames = bag2mp4(bag_path, output_folder)
-                log_df.loc[file_counter] = [bag_path, failed, duration, num_frames, num_frames/30]
+                duration, failed, num_frames, problematic_frames = bag2mp4(bag_path, output_folder)
+                log_df.loc[file_counter] = [bag_path, failed, duration, num_frames, num_frames/30, problematic_frames]
                 file_counter += 1                
 
     # Save the log table to CSV
@@ -257,16 +276,17 @@ path_bag = '/data/bags/cam0_916512060805_record_04_10_2023_1341_07.bag'
 output_folder = '/data/bags/'
 
 def main():
-    # Argument parser setup
     parser = argparse.ArgumentParser(description="Convert bag files to mp4 and log the status.")
     parser.add_argument("bag_folder", help="Path to the folder containing bag files.")
     parser.add_argument("output_folder", help="Path to the output folder for mp4 files.")
     parser.add_argument("log_table_path", help="Path to save the log table as a CSV file.")
     args = parser.parse_args()
 
-    # if we want to process just one file (in that case args.bag_folder has to be a path to the file)
+    ##########################
+    # IF WE WANT TO PROCESS JUST ONE FILE (IN THAT CASE args.bag_folder HAS TO BE A PATH TO THE FILE)
     # failed = bag2mp4(args.bag_folder, args.output_folder)
     # print(failed)
+    ##########################
 
     bag_folder2mp4(args.bag_folder, args.output_folder, args.log_table_path)
     # python bag2mp4.py /home/vita-w11/Downloads/bags/ /home/vita-w11/Downloads/bags/output_test /home/vita-w11/Downloads/bags/output_test/log.csv
