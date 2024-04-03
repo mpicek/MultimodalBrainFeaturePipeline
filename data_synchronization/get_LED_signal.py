@@ -39,22 +39,24 @@ def mp4_folder_get_LED(mp4_folder, output_folder):
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
 
+    processed_files = os.listdir(output_folder)
+    processed_mp4_files = [os.path.basename(file)[:-len('_LED_signal.npy')] + '.mp4' for file in processed_files if file.endswith('_LED_signal.npy')]
+
     for root, _, files in os.walk(mp4_folder):
         for file in files:
             if file.endswith('.mp4'):
                 path_mp4 = os.path.join(root, file)
+
+                if os.path.basename(path_mp4) in processed_mp4_files:
+                    print(f"File {path_mp4} already processed. Skipping")
+                    continue
 
                 led_signal = mp4_get_LED_signal(path_mp4)
                 mp4_basename = os.path.basename(path_mp4)[:-4]
                 np.save(os.path.join(output_folder, mp4_basename + '_LED_signal.npy'), led_signal)
 
 
-def main():
-    # Argument parser setup
-    parser = argparse.ArgumentParser(description="Extract the LED signals from .mp4 files.")
-    parser.add_argument("mp4_folder", help="Path to the folder containing mp4 files.")
-    parser.add_argument("output_folder", help="Path to the output folder LED signals.")
-    args = parser.parse_args()
+def main(mp4_folder, output_folder):
 
     # if we want to process just one file (in that case args.mp4_folder has to be a path to the file)
     # average_values = mp4_get_LED_signal(args.mp4_folder)
@@ -65,7 +67,12 @@ def main():
     # plt.title('Average pixel value over time')
     # plt.show()
 
-    mp4_folder_get_LED(args.mp4_folder, args.output_folder)
+    mp4_folder_get_LED(mp4_folder, output_folder)
 
 if __name__ == "__main__":
-    main()
+    # Argument parser setup
+    parser = argparse.ArgumentParser(description="Extract the LED signals from .mp4 files.")
+    parser.add_argument("mp4_folder", help="Path to the folder containing mp4 files.")
+    parser.add_argument("output_folder", help="Path to the output folder LED signals.")
+    args = parser.parse_args()
+    main(args.mp4_folder, args.output_folder)
