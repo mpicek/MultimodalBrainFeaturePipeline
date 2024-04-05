@@ -39,7 +39,6 @@ class Synchronizer:
 
         self.wisci_server_path = wisci_server_path
         self.log_table_path = log_table_path
-        # read the csv table
         self.log = SyncLogger(log_table_path)
         self.sigma_video = sigma_video
         self.sigma_wisci = sigma_wisci
@@ -60,7 +59,7 @@ class Synchronizer:
         wisci_freq = len(accelerometer_data) / accelerometer_duration
         video_freq = len(forehead) / video_duration
         print("Frequencies - Wisci: ", wisci_freq, ", Video: ", video_freq)
-        print(f"Old video frames: {len(forehead)}")
+        print(f"Video frames (with original FPS): {len(forehead)}")
 
         # upsample the video to the wisci frequency
         new_num_samples = int(len(forehead) * (wisci_freq / video_freq))
@@ -88,14 +87,12 @@ class Synchronizer:
                 best_signal = resampled_video
                 best_n_samples = n_samples
     
-        print("going to save the image")
-
         resampled_video = resample(forehead, int(best_n_samples))
         quality_resampled = resample(quality, int(best_n_samples))
         # _ = self.sync_wisci_and_video(accelerometer_data, resampled_video, quality_resampled, original_mp4_basename, overwrite_visualization=True)
         if self.sync_images_folder is not None and original_mp4_basename is not None:
             plt.figure()
-            plt.plot(corr_accumulated)
+            plt.plot(best_corr_accumulated)
             plt.savefig(os.path.join(self.sync_images_folder, original_mp4_basename[:-4] + "_corr.png"))
 
             around = 15*585 # show 15s before (and 15s after) the log
@@ -133,7 +130,13 @@ class Synchronizer:
             ax.legend()
             plt.savefig(os.path.join(self.sync_images_folder, original_mp4_basename[:-4] + "_two_mins.png"))
 
-            print("img saved")
+            _, ax = plt.subplots(figsize=(15, 5), dpi=200)
+            ax.plot(np.arange(len(accelerometer_data)), accelerometer_data[:, 1], color='red', label='Wisci')
+            ax.plot(np.arange(len(best_signal)) + best_lag, best_signal[:, 1], color='blue', label='From video')
+            ax.plot(np.arange(585), np.zeros((585,)), color='black', label='1s stretch', linewidth=2)
+            ax.legend()
+            
+            plt.savefig(os.path.join(self.sync_images_folder, original_mp4_basename[:-4] + "_whole.png"))
 
         return best_corr, best_lag, best_total_peaks, best_second_largest_corr_peak
     
@@ -148,25 +151,26 @@ class Synchronizer:
         accelerometer_data = preprocess_accelerometer_data(accelerometer_data, self.sigma_wisci)
 
         forehead, quality = extract_movement_from_dlc_csv(csv_full_path)
+        video_duration = np.load(csv_full_path[:-len(self.dlc_suffix)] + '_duration.npy')
 
-        if len(forehead) > 30*15: # less than ~15 seconds
-            video_duration = np.load(csv_full_path[:-len(self.dlc_suffix)] + '_duration.npy')
+        if video_duration > 15: # process videos that are at least 15s long
 
             forehead = preprocess_video_signals(forehead, sigma=self.sigma_video)
 
             best_corr, best_lag, best_total_peaks, best_second_largest_corr_peak = self.sync_and_optimize_freq(accelerometer_data, forehead, accelerometer_duration, video_duration, quality, original_mp4_basename)
-            print(f"Going to update log")
-            print(f"File: {original_mp4_basename}")
+            print(f"Just analyzed file: {original_mp4_basename}")
             print(f"\tBest correlation: {best_corr}\n\tLag: {best_lag}\n\tPeaks: {best_total_peaks}\n\tSecond largest peak: {best_second_largest_corr_peak}")
             sync_failed = 0
 
         else:
             best_corr, best_lag, best_total_peaks, best_second_largest_corr_peak = -1, -1, -1, -1
             sync_failed = 1
+            self.log.update_log(original_mp4_basename, 'mp4_length', video_duration)
             self.log.update_log(original_mp4_basename, 'sync_error_msg', "Video too short (under 15s).")
 
 
         if log:
+            self.log.update_log(original_mp4_basename, 'mp4_length', video_duration)
             self.log.update_log(original_mp4_basename, 'path_wisci', wisci_file)
             self.log.update_log(original_mp4_basename, 'corr', best_corr)
             self.log.update_log(original_mp4_basename, 'lag', best_lag)
@@ -185,7 +189,7 @@ class Synchronizer:
                 f.write(f"Synchronization failed: 0\n")
 
 
-    def process_all_realsense_recordings(self):
+    def sync_mp4_folder(self):
         """
         Goes through the log table and synchronizes Realsense data with relevant WiSci files based on the date.
 
@@ -204,8 +208,10 @@ class Synchronizer:
                 self.log.process_new_file(original_mp4_basename)
             except FileAlreadySynchronized as e:
                 print(e)
+                print(f"Skipping {original_mp4_basename}")
                 continue
 
+            print("Processing: ", original_mp4_basename)
             wisci_file = find_corresponding_wisci(original_mp4_basename, self.wisci_server_path)
             try:
                 self.sync_with_movement(os.path.join(self.dlc_csv_folder, path_csv_basename), wisci_file)
@@ -218,9 +224,7 @@ class Synchronizer:
                 self.log.update_log(original_mp4_basename, 'sync_error_msg', traceback.format_exc())
                 self.log.update_log(original_mp4_basename, 'sync_failed', 1)
             finally:
-                print("going to save the csv file")
                 self.log.save_to_csv()
-                print("csv file saved")
 
     
     def visualize_synchronized(self, path_bag):
@@ -323,4 +327,4 @@ if __name__=="__main__":
     visualize = False
 
     synchronizer = Synchronizer(dlc_csv_folder, wisci_server_path, log_table_path, sigma_video, sigma_wisci, sync_images_folder, visualize)
-    synchronizer.process_all_realsense_recordings()
+    synchronizer.sync_mp4_folder()
