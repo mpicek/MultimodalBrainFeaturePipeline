@@ -5,10 +5,13 @@ import plotly.graph_objects as go
 import matplotlib.pyplot as plt
 from scipy import signal
 from scipy.signal import find_peaks
-from synchronization_utils import preprocess_accelerometer_data, preprocess_video_signals
-from SyncLogger import SyncLogger
+from synchronization_utils import preprocess_accelerometer_data, preprocess_video_signals, extract_movement_from_dlc_csv
+from SyncLogger import SyncLogger, FileAlreadySynchronized
 from accelerometer import get_accelerometer_data, GettingAccelerometerDataFailed
 import traceback
+from scipy.signal import resample
+from tqdm import tqdm
+from find_corresponding_wisci import find_corresponding_wisci
 
 class Synchronizer:
     """
@@ -22,7 +25,7 @@ class Synchronizer:
         sigma (int): Sigma of the Gaussian filter for smoothing.
         visualize (bool): Flag to enable or disable visualization of the synchronization process.
     """
-    def __init__(self, wisci_server_path, output_folder, log_table_path, sigma, visualize=False):
+    def __init__(self, dlc_csv_folder, wisci_server_path, log_table_path, sigma_video, sigma_wisci, sync_images_folder=None, visualize=False):
         """
         Initializes the Synchronizer with paths and settings for data synchronization.
 
@@ -35,88 +38,152 @@ class Synchronizer:
         """
 
         self.wisci_server_path = wisci_server_path
-        self.output_folder = output_folder
         self.log_table_path = log_table_path
         # read the csv table
         self.log = SyncLogger(log_table_path)
-        self.sigma = sigma
+        self.sigma_video = sigma_video
+        self.sigma_wisci = sigma_wisci
         self.visualize = visualize
+        self.dlc_csv_folder = dlc_csv_folder
+        self.dlc_suffix = 'DLC_resnet50_UP2_synchronization_videos_concatenatedMar20shuffle1_495000.csv'
+        self.sync_images_folder = sync_images_folder
 
-    def sync_and_optimize_freq(self, accelerometer_data, forehead_points, quality, cam2face, duration):
+        if self.sync_images_folder is not None and not os.path.exists(self.sync_images_folder):
+            os.makedirs(self.sync_images_folder)
+
+    def sync_and_optimize_freq(self, accelerometer_data, forehead, accelerometer_duration, video_duration, quality, original_mp4_basename=None):
         # trying different frequencies as wisci and realsense are both imprecise in their sampling
         # frequencies so I adjust it like this - we find the freq that gets the best result :)
-        freqs = np.linspace(29.5, 30.2, 100)
+        # print("SYNCING. ACCELEROMETR DATA LENGTH:", len(accelerometer_data))
+        # print("FOREHEAD POINTS LENGTH:", len(forehead_points))
+
+        wisci_freq = len(accelerometer_data) / accelerometer_duration
+        video_freq = len(forehead) / video_duration
+        print("Frequencies - Wisci: ", wisci_freq, ", Video: ", video_freq)
+        print(f"Old video frames: {len(forehead)}")
+
+        # upsample the video to the wisci frequency
+        new_num_samples = int(len(forehead) * (wisci_freq / video_freq))
+
         best_corr = -1
         best_lag = 0
-        best_freq = freqs[0]
         best_total_peaks = 0
         best_second_largest_corr_peak = 0
-        for freq in freqs:
-            video_gradient_smoothed, quality_resampled = preprocess_video_signals(forehead_points, quality, cam2face, duration, freq, sigma=self.sigma)
-            corr, lag, total_peaks, second_largest_corr_peak = self.sync_wisci_and_video(accelerometer_data, video_gradient_smoothed, quality_resampled)
+        best_corr_accumulated = None
+        best_n_samples = 0
+        corrs = []
+
+        best_signal = None
+
+        # TODO: adjust the range and number of tries based on duration
+        for n_samples in tqdm(np.linspace(new_num_samples - 1500, new_num_samples + 1500, 150)):
+
+            resampled_video = resample(forehead, int(n_samples))
+            quality_resampled = resample(quality, int(n_samples))
+
+            corr, lag, total_peaks, second_largest_corr_peak, corr_accumulated = self.sync_wisci_and_video(accelerometer_data, resampled_video, quality_resampled, original_mp4_basename)
+            corrs.append(corr)
             if corr > best_corr:
-                best_corr = corr
-                best_lag = lag
-                best_freq = freq
-                best_total_peaks = total_peaks
-                best_second_largest_corr_peak = second_largest_corr_peak
-        
-        return best_corr, best_lag, best_freq, best_total_peaks, best_second_largest_corr_peak
+                best_corr, best_lag, best_total_peaks, best_second_largest_corr_peak, best_corr_accumulated = corr, lag, total_peaks, second_largest_corr_peak, corr_accumulated
+                best_signal = resampled_video
+                best_n_samples = n_samples
     
-    def sync_with_best_wisci_file(self, possible_wisci_files, path_bag):
-        best_corr_per_wisci_file = []
-        best_lag_per_wisci_file = []
-        best_freq_per_wisci_file = []
-        best_total_peaks_per_wisci_file = []
-        best_second_largest_corr_peak_per_wisci_file = []
+        print("going to save the image")
 
-        # go over wisci files
-        for wisci_file in possible_wisci_files:
-            data_acc = get_accelerometer_data(wisci_file) # can throw exception that will propagate up
-            accelerometer_data = preprocess_accelerometer_data(data_acc, self.sigma)
+        resampled_video = resample(forehead, int(best_n_samples))
+        quality_resampled = resample(quality, int(best_n_samples))
+        # _ = self.sync_wisci_and_video(accelerometer_data, resampled_video, quality_resampled, original_mp4_basename, overwrite_visualization=True)
+        if self.sync_images_folder is not None and original_mp4_basename is not None:
+            plt.figure()
+            plt.plot(corr_accumulated)
+            plt.savefig(os.path.join(self.sync_images_folder, original_mp4_basename[:-4] + "_corr.png"))
 
-            # open the relevant files
-            output_path = self.log.get_value(path_bag, 'output_path')
-            forehead_points = np.load(os.path.join(output_path, 'forehead_points.npy'))
-            quality = np.load(os.path.join(output_path, 'quality.npy'))
-            cam2face = np.load(os.path.join(output_path, 'cam2face.npy'))
-            duration = np.load(os.path.join(output_path, 'duration.npy'))
+            around = 15*585 # show 15s before (and 15s after) the log
+            around = min(around, best_lag) # shorten it from the left side
+            around = min(around, len(accelerometer_data) - best_lag, len(best_signal)) # shorten it from the right side
+            fig, ax = plt.subplots(figsize=(15, 5), dpi=200)
+            ax.plot(np.arange(2*around), accelerometer_data[best_lag-around:best_lag+around, 0], color='red', label='Wisci')
+            ax.plot(np.arange(around) + around, best_signal[:around, 0], color='blue', label='From video')
+            ax.plot(np.arange(585), np.zeros((585,)), color='black', label='1s stretch', linewidth=2)
+            plot_width = 2*around  # Adjust as needed
 
-            if len(forehead_points) > len(accelerometer_data):
-                # I suppose that the whole realsense recording has to be in the wisci recording
-                # (and not just part of it)
-                best_corr_per_wisci_file.append(0)
-                best_lag_per_wisci_file.append(0)
-                best_freq_per_wisci_file.append(0)
-                best_total_peaks_per_wisci_file.append(0)
-                continue
+            # Set grid spacing based on the plot width
+            grid_width = 585 / (1000 / 150)  # Adjust as needed
 
-            best_corr, best_lag, best_freq, best_total_peaks, best_second_largest_corr_peak = self.sync_and_optimize_freq(accelerometer_data, forehead_points, quality, cam2face, duration)
+            # Add grid lines with predefined width
+            ax.grid(True, linewidth=0.5, linestyle='--', color='gray', which='both', alpha=0.5)
+
+            # Set x ticks with predefined width
+            ax.set_xticks(np.arange(0, plot_width, grid_width))
             
-            best_corr_per_wisci_file.append(best_corr)
-            best_lag_per_wisci_file.append(best_lag)
-            best_freq_per_wisci_file.append(best_freq)
-            best_total_peaks_per_wisci_file.append(best_total_peaks)
-            best_second_largest_corr_peak_per_wisci_file.append(best_second_largest_corr_peak)
+            ax.legend()
+            new_labels = [str(int(label) + best_lag - around) for label in ax.get_xticks()]
+            ax.set_xticklabels(new_labels, fontsize=4, rotation=90)
+            plt.savefig(os.path.join(self.sync_images_folder, original_mp4_basename[:-4] + "_beginning.png"))
 
-        best_corr_per_wisci_file = np.array(best_corr_per_wisci_file)
-        index_of_best_wisci_file = np.argmax(best_corr_per_wisci_file)
-        max_corr = best_corr_per_wisci_file[index_of_best_wisci_file]
-        lag = best_lag_per_wisci_file[index_of_best_wisci_file]
-        freq = best_freq_per_wisci_file[index_of_best_wisci_file]
-        index_of_second_best_wisci_file = np.argsort(best_corr_per_wisci_file)[-2]
 
-        self.log.update_log(path_bag, 'path_wisci', possible_wisci_files[index_of_best_wisci_file])
-        self.log.update_log(path_bag, 'normalized_corr', max_corr)
-        self.log.update_log(path_bag, 'lag', lag)
-        self.log.update_log(path_bag, 'fps_bag', freq)
-        self.log.update_log(path_bag, 'peaks_per_million', best_total_peaks_per_wisci_file[index_of_best_wisci_file]/len(accelerometer_data) * 1000000)
-        self.log.update_log(path_bag, 'best_second_largest_corr_peak', best_second_largest_corr_peak_per_wisci_file[index_of_best_wisci_file])
-        self.log.update_log(path_bag, 'second_best_wisci_corr', best_corr_per_wisci_file[index_of_second_best_wisci_file])
-        self.log.update_log(path_bag, 'second_best_wisci_peaks_per_million', best_total_peaks_per_wisci_file[index_of_second_best_wisci_file]/len(accelerometer_data) * 1000000)
-        self.log.update_log(path_bag, 'second_best_wisci_path', possible_wisci_files[index_of_second_best_wisci_file])
-        self.log.update_log(path_bag, 'synchronization_failed', 0)
-        self.log.save_to_csv()
+
+            length = 120*585# first two minutes of the signal if possible
+            # now we shorten the signal if it is too long (otherwise we would get an error due to inconsistent dimensions)
+            length = min(120*585, len(best_signal[:length, 1]), len(accelerometer_data[best_lag:best_lag+length, 1])) 
+            _, ax = plt.subplots(figsize=(15, 5), dpi=200)
+            ax.plot(np.arange(length), accelerometer_data[best_lag:best_lag+length, 1], color='red', label='Wisci')
+            ax.plot(np.arange(length), best_signal[:length, 1], color='blue', label='From video')
+            ax.plot(np.arange(585), np.zeros((585,)), color='black', label='1s stretch', linewidth=2)
+            ax.legend()
+            plt.savefig(os.path.join(self.sync_images_folder, original_mp4_basename[:-4] + "_two_mins.png"))
+
+            print("img saved")
+
+        return best_corr, best_lag, best_total_peaks, best_second_largest_corr_peak
+    
+
+    def sync_with_movement(self, csv_full_path, wisci_file, log=True, output_path_manual=None):
+
+        csv_basename = os.path.basename(csv_full_path)
+        original_mp4_basename = csv_basename[:-len(self.dlc_suffix)] + ".mp4"
+
+        accelerometer_data, accelerometer_duration = get_accelerometer_data(wisci_file) # can throw exception that will propagate up
+
+        accelerometer_data = preprocess_accelerometer_data(accelerometer_data, self.sigma_wisci)
+
+        forehead, quality = extract_movement_from_dlc_csv(csv_full_path)
+
+        if len(forehead) > 30*15: # less than ~15 seconds
+            video_duration = np.load(csv_full_path[:-len(self.dlc_suffix)] + '_duration.npy')
+
+            forehead = preprocess_video_signals(forehead, sigma=self.sigma_video)
+
+            best_corr, best_lag, best_total_peaks, best_second_largest_corr_peak = self.sync_and_optimize_freq(accelerometer_data, forehead, accelerometer_duration, video_duration, quality, original_mp4_basename)
+            print(f"Going to update log")
+            print(f"File: {original_mp4_basename}")
+            print(f"\tBest correlation: {best_corr}\n\tLag: {best_lag}\n\tPeaks: {best_total_peaks}\n\tSecond largest peak: {best_second_largest_corr_peak}")
+            sync_failed = 0
+
+        else:
+            best_corr, best_lag, best_total_peaks, best_second_largest_corr_peak = -1, -1, -1, -1
+            sync_failed = 1
+            self.log.update_log(original_mp4_basename, 'sync_error_msg', "Video too short (under 15s).")
+
+
+        if log:
+            self.log.update_log(original_mp4_basename, 'path_wisci', wisci_file)
+            self.log.update_log(original_mp4_basename, 'corr', best_corr)
+            self.log.update_log(original_mp4_basename, 'lag', best_lag)
+            self.log.update_log(original_mp4_basename, 'peaks_per_million', best_total_peaks/len(accelerometer_data) * 1000000)
+            self.log.update_log(original_mp4_basename, 'best_second_largest_corr_peak', best_second_largest_corr_peak)
+            self.log.update_log(original_mp4_basename, 'sync_failed', sync_failed)
+            self.log.save_to_csv()
+        else:
+            # write the logs into a file logs_manual.txt in the output_path_manual (but if the file exists, append to it)
+            with open(os.path.join(output_path_manual, 'logs_manual.txt'), 'a') as f:
+                f.write(f"Path to the best WiSci file: {wisci_file}\n")
+                f.write(f"Normalized correlation: {best_corr}\n")
+                f.write(f"Lag: {best_lag}\n")
+                f.write(f"Peaks per million: {best_total_peaks/len(accelerometer_data) * 1000000}\n")
+                f.write(f"Second largest correlation peak: {best_second_largest_corr_peak}\n")
+                f.write(f"Synchronization failed: 0\n")
+
 
     def process_all_realsense_recordings(self):
         """
@@ -127,89 +194,34 @@ class Synchronizer:
         For each relevant row, it finds matching WiSci files by date and updates the log table with these files.
         """
 
-        # iterate over rows in the log table (aka over all bag files we want to synchronize)
-        for index, row in self.log.log_df.iterrows():
-            current_bag_path = row['path_bag']
+        processed_files = os.listdir(self.dlc_csv_folder)
+        movement_csv_files_basenames = [os.path.basename(file) for file in processed_files if file.endswith('.csv')]
+
+        for path_csv_basename in movement_csv_files_basenames:
+            original_mp4_basename = path_csv_basename[:-len(self.dlc_suffix)] + ".mp4"
+
             try:
-                print(f"{index + 1}/{len(list(self.log.log_df.iterrows()))}: Bag being processed: {row['path_bag']}")
-                if row['acc_extraction_failed'] == 1:
-                    print("There was an error in extraction, skipping synchronization.")
-                    continue
-                # if the columns 'path_wisci' has no value means it has already been synchronized
-                if pd.notnull(row['path_wisci']):
-                    print("Already synchronized")
-                    print(row['path_wisci'])
-                    continue
-
-                possible_wisci_files = self.find_relevant_wisci_files(row['date'])
-
-                self.log.update_log(current_bag_path, 'relevant_wisci_files', "TODO") # TODO: the cell has to be non-empty in order to write there a list of values
-                self.log.update_log(current_bag_path, 'relevant_wisci_files', possible_wisci_files)
-            
-                self.sync_with_best_wisci_file(possible_wisci_files, current_bag_path)
-
-                # if index == 0:
-                    # self.visualize_synchronized(row['path_bag'])
-            
-            except GettingAccelerometerDataFailed as e:
-                self.log.update_log(current_bag_path, 'unknown_error_synchronization', "GettingAccelerometerDataFailed")
-                self.log.update_log(current_bag_path, 'synchronization_failed', 1)
-
-            except Exception as e:
+                self.log.process_new_file(original_mp4_basename)
+            except FileAlreadySynchronized as e:
                 print(e)
-                self.log.update_log(current_bag_path, 'unknown_error_synchronization', traceback.format_exc())
-                self.log.update_log(current_bag_path, 'synchronization_failed', 1)
-            finally:
-                self.log.save_to_csv()
-
-
-    def find_relevant_wisci_files(self, date):
-        """
-        Finds all .mat files relevant to a given date within the WiSci data directory.
-
-        Parameters:
-            date (str): The date for which to find relevant .mat files, in the format "YYYY_MM_DD".
-
-        Returns:
-            list: A list of paths to the relevant .mat files found.
-            
-        wisci_server_path
-        ├── 2021_01_01_session
-        │   ├── wisci
-        │   │   ├── 2021_01_01_01_01.mat
-        │   │   ├── 2021_01_01_01_02.mat
-        │   │   ├── 2021_01_01_01_03.mat
-        │   │   ├── 2021_01_01_01_03.something
-        ├── 2021_01_02_session
-        │   ├── wimagine
-        │   │   ├── 2021_01_01_01_01.mat
-        │   │   ├── 2021_01_01_01_01.something
-        """
-
-        possible_wisci_files = []
-        for folder in os.listdir(self.wisci_server_path):
-            if date not in folder: # skip if the date is not in the folder's name
                 continue
 
-            # we found a folder from the correct date
-            day_folder = os.path.join(self.wisci_server_path, folder)
-            # now find wisci folder
-            for day_subfolder in os.listdir(day_folder):
-                # if includes wisci or wimagine (case insensitive)
-                if 'wisci' not in day_subfolder.lower() and 'wimagine' not in day_subfolder.lower():
-                    continue
+            wisci_file = find_corresponding_wisci(original_mp4_basename, self.wisci_server_path)
+            try:
+                self.sync_with_movement(os.path.join(self.dlc_csv_folder, path_csv_basename), wisci_file)
+            except GettingAccelerometerDataFailed as e:
+                print(f"Getting accelerometer data failed for {wisci_file}. Skipping the file.")
+                self.log.update_log(original_mp4_basename, 'sync_error_msg', "GettingAccelerometerDataFailed")
+                self.log.update_log(original_mp4_basename, 'sync_failed', 1)
+            except Exception as e:
+                print(traceback.format_exc())
+                self.log.update_log(original_mp4_basename, 'sync_error_msg', traceback.format_exc())
+                self.log.update_log(original_mp4_basename, 'sync_failed', 1)
+            finally:
+                print("going to save the csv file")
+                self.log.save_to_csv()
+                print("csv file saved")
 
-                wisci_folder = os.path.join(day_folder, day_subfolder)
-
-                # now in wisci folder, there is many subfolders, each containing just one .mat file,
-                # let's find those .mat files
-                for root, _, files in os.walk(wisci_folder): # returns all possible paths in the tree
-                    for file in files:
-                        if file.endswith('.mat'):
-                            wisci_file = os.path.join(root, file)
-                            possible_wisci_files.append(wisci_file)
-        
-        return possible_wisci_files
     
     def visualize_synchronized(self, path_bag):
         # get the row from the log table
@@ -226,44 +238,42 @@ class Synchronizer:
         video_gradient_smoothed, quality_resampled = preprocess_video_signals(forehead_points, quality, cam2face, duration, self.log.get_value(path_bag, 'fps_bag'), sigma=self.sigma)
         corr, lag, _, second_largest_corr_peak = self.sync_wisci_and_video(accelerometer_data, video_gradient_smoothed, quality_resampled, overwrite_visualization=True)
     
-    def sync_wisci_and_video(self, accelerometer_data, video, quality, overwrite_visualization=False):
+    def sync_wisci_and_video(self, accelerometer_data, video, quality, original_mp4_basename=None, overwrite_visualization=False):
 
         corr_accumulated = None
 
         arr = []
         for i in range(3):
             sig1 = accelerometer_data[:, i]
-            for j in range(3):
+            for j in range(2):
                 sig2 = video[:, j]
 
-                shifted_sig1 = sig1 - np.mean(sig1)
-                shifted_sig2 = sig2 - np.mean(sig2)
-                normalized_sig1 = shifted_sig1 / (np.std(shifted_sig1))
-                normalized_sig2 = shifted_sig2 / (np.std(shifted_sig2))
-
-                sig1 = normalized_sig1
-                sig2 = normalized_sig2
                 sig2 = sig2 * quality
 
                 # we use "valid" because we suppose that the realsense video is whole in the wisci recording (not just a part of it)
                 correlation = signal.correlate(sig1, sig2, mode="valid")
-                normalization_factor = len(sig2) # not this: min(len(sig1), len(sig2)) because the video has to fit there in the recording
-                correlation /= normalization_factor
                 lags = signal.correlation_lags(sig1.size, sig2.size, mode="valid")
+
+                # IMPORTANT to normalize this.
+                # If we have some strong movement but it does not correlate with the video (for example head moving back and forth),
+                # then the correlation will be high everywhere. But if there is some small movement but correlates highly (overall
+                # corr is small but the peak is very prominent), then this might be overpowered by the first case.
+                correlation_normalized = correlation
+
                 if corr_accumulated is None:
-                    corr_accumulated = np.abs(correlation)
+                    corr_accumulated = np.abs(correlation_normalized)
                 else:
-                    corr_accumulated += np.abs(correlation)
-                lag = lags[np.argmax(np.abs(correlation))]
-                arr.append([i, j, np.max(np.abs(correlation)), lag, lag/(60*30)])
+                    corr_accumulated += np.abs(correlation_normalized)
+                lag = lags[np.argmax(np.abs(correlation_normalized))]
+    
+                arr.append([i, j, lag])
 
-
-                if self.visualize or overwrite_visualization:
-                    print(lag)
+                if (self.visualize or overwrite_visualization) and len(sig1) < 1000000:
                     print(i, j)
-                    print(np.max(np.abs(correlation)))
+                    print("Lag: ", lag)
+                    print("correlation: ", np.max(np.abs(correlation)))
                     fig = go.Figure()
-                    fig.add_trace(go.Scatter(x=np.arange(len(np.abs(correlation))), y=np.abs(correlation), mode='lines', name='correlation', line=dict(color='red')))
+                    fig.add_trace(go.Scatter(x=np.arange(len(np.abs(correlation_normalized))), y=np.abs(correlation_normalized), mode='lines', name='correlation', line=dict(color='red')))
                     fig.show()
 
                     fig = go.Figure()
@@ -271,14 +281,14 @@ class Synchronizer:
                 
                     # we computed abs(correlation), to visualize the signals, let's align them
                     # (if they were anticorrelated, just put minus before the signal)
-                    if correlation[np.argmax(np.abs(correlation))] > 0:
+                    if correlation_normalized[np.argmax(np.abs(correlation_normalized))] > 0:
                         fig.add_trace(go.Scatter(x=np.arange(len(sig2)) + lag, y=sig2, mode='lines', name='correlation', line=dict(color='blue')))
                     else:
                         fig.add_trace(go.Scatter(x=np.arange(len(sig2)) + lag, y=-sig2, mode='lines', name='correlation', line=dict(color='blue')))
                     fig.show()
 
 
-        peaks, _ = find_peaks(np.abs(corr_accumulated), height=0.5*np.max(np.abs(corr_accumulated)), distance=30*2) # TODO: fix distance by the freq
+        peaks, _ = find_peaks(corr_accumulated, height=0.5*np.max(corr_accumulated), distance=585*2) # TODO: fix distance by the freq
         second_largest_corr_peak = 0
         if len(peaks) < 2:
             second_largest_corr_peak = 0
@@ -287,17 +297,30 @@ class Synchronizer:
             sorted_unique_peak_values = np.sort(np.unique(peak_values))
             second_largest_corr_peak = sorted_unique_peak_values[-2]
 
-        if self.visualize or overwrite_visualization:
+        if (self.visualize or overwrite_visualization) and len(sig1) < 1000000:
             fig = go.Figure()
             fig.add_trace(go.Scatter(x=np.arange(len(corr_accumulated)), y=corr_accumulated, mode='lines', name='correlation', line=dict(color='blue')))
             fig.show()
-
+    
             arr = np.array(arr)
             # make it a pandas df
-            df = pd.DataFrame(arr, columns=["i", "j", "corr", "lag", "time"])
+            df = pd.DataFrame(arr, columns=["i", "j", "lag"])
             # sort by correlation
-            df = df.sort_values("corr", ascending=False)
-            print(lags[np.argmax(corr_accumulated)])
-            print(df)
 
-        return np.max(corr_accumulated), lags[np.argmax(corr_accumulated)], len(peaks), second_largest_corr_peak
+        return np.max(corr_accumulated), lags[np.argmax(corr_accumulated)], len(peaks), second_largest_corr_peak, corr_accumulated
+    
+
+if __name__=="__main__":
+
+    # data_folder = "/media/vita-w11/T71/UP2001/"
+    data_folder = '/home/vita-w11/mpicek/data/'
+    dlc_csv_folder = os.path.join(data_folder, 'mp4')
+    wisci_server_path = os.path.join(data_folder, 'WISCI')
+    log_table_path = os.path.join(data_folder, 'sync_log5.csv')
+    sync_images_folder = os.path.join(data_folder, 'sync_images5')
+    sigma_video = 10
+    sigma_wisci = 200
+    visualize = False
+
+    synchronizer = Synchronizer(dlc_csv_folder, wisci_server_path, log_table_path, sigma_video, sigma_wisci, sync_images_folder, visualize)
+    synchronizer.process_all_realsense_recordings()
