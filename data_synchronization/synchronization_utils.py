@@ -1,10 +1,11 @@
 
 import numpy as np
-import face_recognition
+# import face_recognition
 import cv2
 from scipy.signal import resample
 import plotly.graph_objects as go
 from scipy.ndimage import gaussian_filter
+import pandas as pd
 
 def get_face_coordinate_system(detection_result, color_image):
     """
@@ -98,37 +99,40 @@ def get_forehead_point(detection_result, color_image):
         detection_result.face_landmarks[0][8].z * color_image.shape[1],
     ])
 
+def get_forehead_point_dlc(detection_result):
+    return detection_result[0][0], detection_result[0][1], detection_result[0][2]
+
 class NoFaceDetectedException(Exception):
     pass
 
-def recognize_patient(color_image, patients_encoding):
-    """
-    Parameters:
-    - color_image (numpy.ndarray): The color image (RGB) in which to recognize the patient's face. Expected shape is (height, width, 3).
-    - patients_encoding (np.ndarray): Encoding of the patient's face(s)
+# def recognize_patient(color_image, patients_encoding):
+#     """
+#     Parameters:
+#     - color_image (numpy.ndarray): The color image (RGB) in which to recognize the patient's face. Expected shape is (height, width, 3).
+#     - patients_encoding (np.ndarray): Encoding of the patient's face(s)
 
-    Returns:
-    - tuple: A tuple of 4 integers representing the location of the patient's face in the image: (top, right, bottom, left).
+#     Returns:
+#     - tuple: A tuple of 4 integers representing the location of the patient's face in the image: (top, right, bottom, left).
 
-    Raises:
-    - NoFaceDetectedException: If no faces are detected in the provided image.
+#     Raises:
+#     - NoFaceDetectedException: If no faces are detected in the provided image.
 
-    Note:
-    - The face recognition model used is 'cnn' - a slower but much better model for face localization than the default 'hog' model.
-    """
+#     Note:
+#     - The face recognition model used is 'cnn' - a slower but much better model for face localization than the default 'hog' model.
+#     """
 
-    # face_recognition library works with BGR images
-    locations = face_recognition.face_locations(cv2.cvtColor(color_image, cv2.COLOR_RGB2BGR), model='cnn')
-    encodings = face_recognition.face_encodings(cv2.cvtColor(color_image, cv2.COLOR_RGB2BGR), known_face_locations=locations)
+#     # face_recognition library works with BGR images
+#     locations = face_recognition.face_locations(cv2.cvtColor(color_image, cv2.COLOR_RGB2BGR), model='cnn')
+#     encodings = face_recognition.face_encodings(cv2.cvtColor(color_image, cv2.COLOR_RGB2BGR), known_face_locations=locations)
 
-    if len(locations) == 0:
-        raise NoFaceDetectedException("No face detected in the image")
+#     if len(locations) == 0:
+#         raise NoFaceDetectedException("No face detected in the image")
     
-    face_distances = face_recognition.face_distance(encodings, patients_encoding)
-    patients_face_index = np.argmin(face_distances)
-    patients_face_location = locations[patients_face_index]
+#     face_distances = face_recognition.face_distance(encodings, patients_encoding)
+#     patients_face_index = np.argmin(face_distances)
+#     patients_face_location = locations[patients_face_index]
 
-    return patients_face_location, np.argmin(face_distances)
+#     return patients_face_location, np.argmin(face_distances)
 
 def smooth(y, sigma):
     return gaussian_filter(y, sigma)
@@ -168,6 +172,7 @@ def rotation_z_axis_counterclws(angle):
 
 def preprocess_accelerometer_data(data, sigma):
 
+    print(f"Accelerometer smoothing factor: {sigma}")
     x_acc = smooth(data[:, 0], sigma)
     y_acc = smooth(data[:, 1], sigma)
     z_acc = smooth(data[:, 2], sigma)
@@ -179,64 +184,46 @@ def preprocess_accelerometer_data(data, sigma):
     y_acc = smooth(y_acc, sigma)
     z_acc = smooth(z_acc, sigma)
 
-    return np.column_stack([x_acc, y_acc, z_acc])
+    accelerometer_data = np.column_stack([x_acc, y_acc, z_acc])
 
-def preprocess_video_signals(forehead_points, quality, cam2face, original_time, desired_realsense_fps, sigma):
+    # Let's move the signals so that they are centered around zero.
+    # With this processing we assume, that most of the time, the patient's head
+    # IS NOT MOVING! Otherwise, idle state of the head would not be at zero.
+    accelerometer_data -= np.mean(accelerometer_data)
+    accelerometer_data /= np.std(accelerometer_data)
 
-    face2cam = np.linalg.inv(cam2face)
+    return accelerometer_data
 
-    # we suppose that the Wisci is just 45deg rotated in the y direction 
-    # R_y = rotation_y_axis_counterclws(45)
-    R_x = rotation_x_axis_counterclws(10)
-    R_z = rotation_z_axis_counterclws(10)
-    R_y = rotation_y_axis_counterclws(-33.29)
+def preprocess_video_signals(forehead_points, sigma):
 
-    in_face_space = np.dot(face2cam, forehead_points.T).T
-    rotated_by_y_cam = np.dot(R_z, in_face_space.T).T
-    rotated_by_z_cam = np.dot(R_y, rotated_by_y_cam.T).T
-    in_wisci_space = np.dot(R_x, rotated_by_z_cam.T).T
-
-    # Assuming `original_signal` is your NumPy array containing the signal
-    original_signal = in_wisci_space  # Your signal data
-    original_rate = in_wisci_space.shape[0] / original_time  # The original sampling rate
-
-    # Calculate the duration of your signal
-    num_samples = original_signal.shape[0]
-    duration = num_samples / original_rate
-
-    # Calculate the new number of samples required for the desired rate
-    new_num_samples = int(np.round(duration * desired_realsense_fps))
-
-    # Use scipy's resample to adjust the signal
-    resampled_signal = resample(original_signal, new_num_samples)
-
-    resampled_quality = resample(quality, new_num_samples)
-
-    x_smoothed = smooth(resampled_signal[:, 0], sigma)
-    y_smoothed = smooth(resampled_signal[:, 1], sigma)
-    z_smoothed = smooth(resampled_signal[:, 2], sigma)
+    x_smoothed = smooth(forehead_points[:, 0], sigma)
+    y_smoothed = smooth(forehead_points[:, 1], sigma)
 
     x_gradient = np.gradient(x_smoothed)
     y_gradient = np.gradient(y_smoothed)
-    z_gradient = np.gradient(z_smoothed)
 
     x_gradient_smoothed = smooth(x_gradient, sigma)
     y_gradient_smoothed = smooth(y_gradient, sigma)
-    z_gradient_smoothed = smooth(z_gradient, sigma)
 
     x_gradient_smoothed = np.gradient(x_gradient_smoothed)
     y_gradient_smoothed = np.gradient(y_gradient_smoothed)
-    z_gradient_smoothed = np.gradient(z_gradient_smoothed)
 
     x_gradient_smoothed = smooth(x_gradient_smoothed, sigma)
     y_gradient_smoothed = smooth(y_gradient_smoothed, sigma)
-    z_gradient_smoothed = smooth(z_gradient_smoothed, sigma)
 
     x_gradient_smoothed = np.gradient(x_gradient_smoothed)
     y_gradient_smoothed = np.gradient(y_gradient_smoothed)
-    z_gradient_smoothed = np.gradient(z_gradient_smoothed)
 
-    return np.column_stack([x_gradient_smoothed, y_gradient_smoothed, z_gradient_smoothed]), resampled_quality
+    video_signal = np.column_stack([x_gradient_smoothed, y_gradient_smoothed])
+
+    # Let's move the signals so that they are centered around zero.
+    # With this processing we assume, that most of the time, the patient's head
+    # IS NOT MOVING! Otherwise, idle state of the head would not be at zero.
+    video_signal -= np.mean(video_signal)
+    video_signal /= np.std(video_signal)
+
+    return video_signal
+
 
 def find_data_in_wisci(mat, looked_for, looked_for2=None):
     """
@@ -272,3 +259,6 @@ def find_data_in_wisci(mat, looked_for, looked_for2=None):
 
     raise ValueError(f"Data {looked_for} not found in the mat file.")
 
+def extract_movement_from_dlc_csv(path_csv):
+    df = pd.read_csv(path_csv, header=2)
+    return np.array([np.array(df['x']), np.array(df['y'])]).T, np.array(df['likelihood'])

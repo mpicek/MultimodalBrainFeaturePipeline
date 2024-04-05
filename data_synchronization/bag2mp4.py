@@ -59,7 +59,7 @@ def create_videos_from_bag(path_bag, output_folder):
         duration = playback.get_duration().total_seconds() * 1000
         print(f"Overall video duration: {playback.get_duration()}")
     except Exception as e:
-        return 0, str(e), 0
+        return 0, str(e), 0, 0
     
     # we want to set_real_time to False, so that we can process the frames as slowly as necessary.
     # However, there are errors reading it at the beginning and at the end (hopefully not in the middle)
@@ -281,7 +281,9 @@ def bag_folder2mp4(bag_folder, output_folder, log_table_path):
                     problematic_frames,
                     os.path.basename(bag_path)[:-4] + '.mp4'
                 ]
-                file_counter += 1                
+                file_counter += 1
+                log_df.to_csv(log_table_path, index=False)
+
 
     log_df.to_csv(log_table_path, index=False)
     print(f"Log table saved to {log_table_path}")
