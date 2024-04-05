@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import cv2
 import pyrealsense2 as rs
 
-def get_LED_mask(video_array, visualize_pipeline=False, cropped_LED_image_colorful=None):
+def get_LED_mask(video_array, visualize_pipeline=False, cropped_LED_image_colorful=None, save_vizualization_to=None):
     """
     Generates a mask for LED region in a video based on frame variability.
 
@@ -44,12 +44,15 @@ def get_LED_mask(video_array, visualize_pipeline=False, cropped_LED_image_colorf
     
     dilated_image = morphology.dilation(eroded_image, morphology.disk(3))  # Adjust the structuring element as needed
 
+    # use the dilated image if there is at least one white pixel, otherwise return the binary_image
+    final_mask = dilated_image if np.sum(dilated_image) > 0 else binary_image
+
     if visualize_pipeline:
-        visualize_LED_detection_pipeline(std_image, blurred_image, binary_image, dilated_image, cropped_LED_image_colorful)
+        visualize_LED_detection_pipeline(std_image, blurred_image, binary_image, final_mask, cropped_LED_image_colorful, save_vizualization_to=save_vizualization_to)
 
-    return dilated_image
+    return final_mask
 
-def visualize_LED_detection_pipeline(std_image, blurred_image, binary_image, dilated_image, cropped_LED_image_colorful=None):
+def visualize_LED_detection_pipeline(std_image, blurred_image, binary_image, dilated_image, cropped_LED_image_colorful=None, save_vizualization_to=None):
     """
     Visualizes the steps in the LED detection pipeline.
 
@@ -86,6 +89,9 @@ def visualize_LED_detection_pipeline(std_image, blurred_image, binary_image, dil
 
         plt.tight_layout()
         plt.show()
+        if save_vizualization_to:
+            plt.savefig(save_vizualization_to)
+
 
     else:
         fig, axes = plt.subplots(1, 5, figsize=(30, 6))
@@ -113,6 +119,9 @@ def visualize_LED_detection_pipeline(std_image, blurred_image, binary_image, dil
 
         plt.tight_layout()
         plt.show()
+        if save_vizualization_to:
+            plt.savefig(save_vizualization_to)
+
 
 def get_LED_signal_from_video(video_path, LED_mask, ref_point, n_frames, downscale_factor):
     """

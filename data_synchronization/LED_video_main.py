@@ -2,6 +2,7 @@ import numpy as np
 from LED_utils import get_LED_mask, get_LED_signal_from_video
 import cv2
 from LED_GUI_cropper import ImageCropper
+import os
 
 def crop_subsampled_LED_red_channel_from_video_for_std(video_path, n_frames, downscale_factor, downsample_frames_factor):
     """
@@ -76,9 +77,18 @@ def crop_subsampled_LED_red_channel_from_video_for_std(video_path, n_frames, dow
 
 
 if __name__ == "__main__":
+    """
+    INPUT:  /path/to/video/video.mp4
+    OUTUPT: /path/to/video/video_LED_data.npy
+            /path/to/video/video_LED_mask.png  (if the visualization is enabled in get_LED_mask function)
+    """
 
-    video_path = '/home/mpicek/repos/master_project/test_data/camera/C0359.MP4'
-    n_frames = 10000
+    # video_path = '/data/output.mp4'
+    video_path = '/data/bags/cam0_916512060805_record_04_10_2023_1341_07.mp4'
+    video_basename = os.path.basename(video_path)[:-4]
+    video_path_only = os.path.dirname(video_path)
+
+    n_frames = 54000 # (54000 = 30 minutes of 30 fps video)
     downscale_factor = 2
     downsample_frames_factor = 25
 
@@ -92,7 +102,8 @@ if __name__ == "__main__":
     binary_mask = get_LED_mask(
         subsampled_video_array,
         visualize_pipeline=True,
-        cropped_LED_image_colorful=cropped_LED_image_colorful
+        cropped_LED_image_colorful=cropped_LED_image_colorful,
+        save_vizualization_to=os.path.join(video_path_only, video_basename + '_LED_mask.png')
     )
 
     if subsampled_video_array is not None:
@@ -100,6 +111,11 @@ if __name__ == "__main__":
         # The shape will be (num_frames, new_height, new_width, channels)
     
     average_values = get_LED_signal_from_video(video_path, binary_mask, ref_point, n_frames, downscale_factor)
+
+    np.save(os.path.join(video_path_only, video_basename + '_LED_data.npy'), average_values)
+
+    
+    # np.save('/data/output.npy', average_values)
     import matplotlib.pyplot as plt
     plt.plot(np.arange(len(average_values)) / 25, average_values)
     plt.xlabel('Time (s)')

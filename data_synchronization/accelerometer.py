@@ -171,7 +171,7 @@ def get_LED_data(mat_file):
 
     duration = find_wisci_duration(mat, led_stream)
     
-    return original_freq, duration
+    return original_freq['led'], duration
 
 
 def find_wisci_duration(mat, stream_name):
