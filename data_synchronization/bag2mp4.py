@@ -108,7 +108,6 @@ def create_videos_from_bag(path_bag, output_folder):
                     frames_list.append(np.zeros((480, 640, 3), dtype=np.uint8))
                 continue
 
-            last_frame_nb = frame_nb
             frame_nb = color_frame.get_frame_number()
 
             # finish of the file (no more new frames)
@@ -123,7 +122,6 @@ def create_videos_from_bag(path_bag, output_folder):
             depth_image_rs = np.asanyarray(depth_frame.get_data())
             color_image_rs = np.asanyarray(color_frame.get_data()) # returns RGB!
 
-            frames_list.append(cv2.cvtColor(color_image_rs, cv2.COLOR_BGR2RGB))
 
             if first_frame: 
                 t0 = ts
@@ -134,16 +132,17 @@ def create_videos_from_bag(path_bag, output_folder):
             if ts - t0 + 1000 > duration:
                 break
 
-            if prev_ts >= int(ts-t0):
-                # doubled frame or some other error in ordering (we don't include the frame
-                # as we don't want it multiple times)
-                if len(frames_list) > 0:
-                    frames_list.append(frames_list[-1])
-                else:
-                    # the detection will not work, which is ok, we filter it with quality
-                    frames_list.append(np.zeros((480, 640, 3), dtype=np.uint8))
+            if prev_ts > int(ts-t0):
+                problematic_frames += 1
                 continue
 
+            if prev_ts == int(ts-t0):
+                problematic_frames += 1
+                continue
+
+
+            frames_list.append(cv2.cvtColor(color_image_rs, cv2.COLOR_BGR2RGB))
+            time_series.append(ts)
             
             prev_prev_ts = prev_ts
             prev_ts = int(ts-t0)
@@ -159,8 +158,6 @@ def create_videos_from_bag(path_bag, output_folder):
                     for i in range(num_of_skipped_frames):
                         frames_list.append(np.zeros((480, 640, 3), dtype=np.uint8))
 
-            time_series.append([prev_ts])
-
             ch = cv2.waitKey(1)
             if ch==113: #q pressed
                 failed = "Keyboard Interrupt"
@@ -173,7 +170,9 @@ def create_videos_from_bag(path_bag, output_folder):
                 non_zero_index = np.where((frames_list != np.zeros((480, 640, 3))).any(axis=1))[0][0]
                 frames_list[:non_zero_index] = frames_list[non_zero_index]
                 ffmpegio.video.write(os.path.join(output_folder, formatted_number + '.mp4'), 30, frames_list, show_log=True, loglevel="warning")
-                print(f"{len(time_series) / (30*30) / 2} minutes processed")
+                print(f"{len(time_series) / (30*30) / 2 + video_counter/2} minutes processed")
+                np.save(os.path.join(output_folder, formatted_number + '.npy'), np.array(time_series))
+                time_series = []
                 frames_list = []
                 video_counter += 1
 
@@ -189,7 +188,10 @@ def create_videos_from_bag(path_bag, output_folder):
             frames_list[:non_zero_index] = frames_list[non_zero_index]
             formatted_number = '{:04d}'.format(video_counter)
             ffmpegio.video.write(os.path.join(output_folder, formatted_number + '.mp4'), 30, frames_list, show_log=True, loglevel="warning")
-            print(f"{len(time_series) / (30*30) / 2} minutes processed")
+            print(f"{len(time_series) / (30*30) / 2 + video_counter/2} minutes processed")
+            np.save(os.path.join(output_folder, formatted_number + '.npy'), np.array(time_series))
+            time_series = []
+
         pipeline.stop()
         cv2.destroyAllWindows()
     
@@ -212,11 +214,17 @@ def bag2mp4(path_bag, output_folder):
     # List all mp4 files in the current directory alphabetically
     mp4_files = sorted([os.path.join(tmp_folder, file) for file in os.listdir(tmp_folder) if file.endswith('.mp4')])
 
+    timestamp_files = []
+
     if len(mp4_files) > 0:
         # Create a temporary file listing all mp4 files
         with open(os.path.join(tmp_folder, 'file_list.txt'), 'w') as file_list:
             for mp4_file in mp4_files:
                 file_list.write(f"file '{mp4_file}'\n")
+                timestamp_files.append(mp4_file[:-4] + '.npy')
+        
+        concatenated_timestamps = np.concatenate([np.load(file) for file in timestamp_files])
+        np.save(os.path.join(output_folder, os.path.basename(path_bag)[:-4] + '_timestamps.npy'), concatenated_timestamps)
 
 
         # Concatenate mp4 files using ffmpeg
@@ -291,9 +299,9 @@ def bag_folder2mp4(bag_folder, output_folder, log_table_path):
 
 def main():
     parser = argparse.ArgumentParser(description="Convert bag files to mp4 and log the status.")
-    parser.add_argument("--bag_folder", type=str, help="Path to the folder containing bag files.")
-    parser.add_argument("--output_folder", type=str, help="Path to the output folder for mp4 files.")
-    parser.add_argument("--log_table_path", type=str, help="Path to save the log table as a CSV file.")
+    parser.add_argument("bag_folder", type=str, help="Path to the folder containing bag files.")
+    parser.add_argument("output_folder", type=str, help="Path to the output folder for mp4 files.")
+    parser.add_argument("log_table_path", type=str, help="Path to save the log table as a CSV file.")
     args = parser.parse_args()
 
     ##########################
