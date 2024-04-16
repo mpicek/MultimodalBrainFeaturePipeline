@@ -27,9 +27,11 @@ class SyncLogger:
         ]
 
         if os.path.exists(log_table_path):
-            self.log_df = pd.read_csv(log_table_path)
+            self.original_df = pd.read_csv(log_table_path)
         else:
-            self.log_df = pd.DataFrame(columns=self.columns)
+            self.original_df = pd.DataFrame(columns=self.columns)
+        
+        self.log_df = None
 
 
     def process_new_file(self, mp4_name):
@@ -39,13 +41,13 @@ class SyncLogger:
         Parameters:
         - filename: The name of the file being processed.
         """
-        if not self.log_df['mp4_name'].str.contains(mp4_name).any():
+        if not self.original_df['mp4_name'].str.contains(mp4_name).any():
 
             filled_columns = {column: None for column in self.columns}
             filled_columns['mp4_name'] = mp4_name
 
-            new_row = pd.DataFrame([filled_columns])
-            self.log_df = pd.concat([self.log_df, new_row], ignore_index=True)
+            self.log_df = pd.DataFrame([filled_columns])
+            # self.log_df = pd.concat([self.log_df, new_row], ignore_index=True)
         
         else:
             raise FileAlreadySynchronized(f"File {mp4_name} already exists in the log.")
@@ -85,4 +87,11 @@ class SyncLogger:
         """
         Save the log to a CSV file.
         """
-        self.log_df.to_csv(self.log_table_path, index=False)
+        if os.path.exists(self.log_table_path):
+            self.original_df = pd.read_csv(self.log_table_path)
+        else:
+            self.original_df = pd.DataFrame(columns=self.columns)
+
+        self.original_df = pd.concat([self.original_df, self.log_df], ignore_index=True)
+
+        self.original_df.to_csv(self.log_table_path, index=False)
