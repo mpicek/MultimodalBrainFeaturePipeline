@@ -261,4 +261,4 @@ def find_data_in_wisci(mat, looked_for, looked_for2=None):
 
 def extract_movement_from_dlc_csv(path_csv):
     df = pd.read_csv(path_csv, header=2)
-    return np.array([np.array(df['x']), np.array(df['y'])]).T, np.array(df['likelihood'])
+    return np.array([np.array(df['x.1']), np.array(df['y.1'])]).T, np.array(df['likelihood.1'])
