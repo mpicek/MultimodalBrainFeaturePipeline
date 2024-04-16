@@ -44,7 +44,7 @@ class Synchronizer:
         self.sigma_wisci = sigma_wisci
         self.visualize = visualize
         self.dlc_csv_folder = dlc_csv_folder
-        self.dlc_suffix = 'DLC_resnet50_UP2_synchronization_videos_concatenatedMar20shuffle1_495000.csv'
+        self.dlc_suffix = 'DLC_resnet50_UP2_movement_syncApr15shuffle1_275000.csv'
         self.sync_images_folder = sync_images_folder
 
         if self.sync_images_folder is not None and not os.path.exists(self.sync_images_folder):
@@ -135,10 +135,9 @@ class Synchronizer:
             ax.plot(np.arange(len(best_signal)) + best_lag, best_signal[:, 1], color='blue', label='From video')
             ax.plot(np.arange(585), np.zeros((585,)), color='black', label='1s stretch', linewidth=2)
             ax.legend()
-            
             plt.savefig(os.path.join(self.sync_images_folder, original_mp4_basename[:-4] + "_whole.png"))
 
-        return best_corr, best_lag, best_total_peaks, best_second_largest_corr_peak
+        return best_corr, best_lag, best_n_samples, best_total_peaks, best_second_largest_corr_peak
     
 
     def sync_with_movement(self, csv_full_path, wisci_file, log=True, output_path_manual=None):
@@ -157,13 +156,14 @@ class Synchronizer:
 
             forehead = preprocess_video_signals(forehead, sigma=self.sigma_video)
 
-            best_corr, best_lag, best_total_peaks, best_second_largest_corr_peak = self.sync_and_optimize_freq(accelerometer_data, forehead, accelerometer_duration, video_duration, quality, original_mp4_basename)
+            best_corr, best_lag, best_n_samples, best_total_peaks, best_second_largest_corr_peak = self.sync_and_optimize_freq(accelerometer_data, forehead, accelerometer_duration, video_duration, quality, original_mp4_basename)
             print(f"Just analyzed file: {original_mp4_basename}")
-            print(f"\tBest correlation: {best_corr}\n\tLag: {best_lag}\n\tPeaks: {best_total_peaks}\n\tSecond largest peak: {best_second_largest_corr_peak}")
+            print(f"\tBest correlation: {best_corr}\n\tLag: {best_lag}\n\tPeaks: {best_total_peaks-1}\n\tSecond largest peak: {best_second_largest_corr_peak}")
             sync_failed = 0
 
         else:
-            best_corr, best_lag, best_total_peaks, best_second_largest_corr_peak = -1, -1, -1, -1
+            best_corr, best_lag, best_n_samples, best_total_peaks, best_second_largest_corr_peak = -1, -1, -1, -1, -1
+
             sync_failed = 1
             self.log.update_log(original_mp4_basename, 'mp4_length', video_duration)
             self.log.update_log(original_mp4_basename, 'sync_error_msg', "Video too short (under 15s).")
@@ -171,20 +171,21 @@ class Synchronizer:
 
         if log:
             self.log.update_log(original_mp4_basename, 'mp4_length', video_duration)
+            self.log.update_log(original_mp4_basename, 'frames', best_n_samples)
             self.log.update_log(original_mp4_basename, 'path_wisci', wisci_file)
             self.log.update_log(original_mp4_basename, 'corr', best_corr)
             self.log.update_log(original_mp4_basename, 'lag', best_lag)
-            self.log.update_log(original_mp4_basename, 'peaks_per_million', best_total_peaks/len(accelerometer_data) * 1000000)
+            self.log.update_log(original_mp4_basename, 'additional_peaks_per_million', (best_total_peaks-1)/len(accelerometer_data) * 1000000)
             self.log.update_log(original_mp4_basename, 'best_second_largest_corr_peak', best_second_largest_corr_peak)
             self.log.update_log(original_mp4_basename, 'sync_failed', sync_failed)
-            self.log.save_to_csv()
         else:
             # write the logs into a file logs_manual.txt in the output_path_manual (but if the file exists, append to it)
             with open(os.path.join(output_path_manual, 'logs_manual.txt'), 'a') as f:
                 f.write(f"Path to the best WiSci file: {wisci_file}\n")
                 f.write(f"Normalized correlation: {best_corr}\n")
+                f.write(f"Number of frames: {best_n_samples}\n")
                 f.write(f"Lag: {best_lag}\n")
-                f.write(f"Peaks per million: {best_total_peaks/len(accelerometer_data) * 1000000}\n")
+                f.write(f"Peaks per million: {(best_total_peaks-1)/len(accelerometer_data) * 1000000}\n")
                 f.write(f"Second largest correlation peak: {best_second_largest_corr_peak}\n")
                 f.write(f"Synchronization failed: 0\n")
 
@@ -320,8 +321,17 @@ if __name__=="__main__":
     data_folder = '/home/vita-w11/mpicek/data/'
     dlc_csv_folder = os.path.join(data_folder, 'mp4')
     wisci_server_path = os.path.join(data_folder, 'WISCI')
-    log_table_path = os.path.join(data_folder, 'sync_log5.csv')
-    sync_images_folder = os.path.join(data_folder, 'sync_images5')
+    log_table_path = os.path.join(data_folder, 'sync_log.csv')
+    sync_images_folder = os.path.join(data_folder, 'sync_images')
+
+
+
+
+    data_folder = '/media/vita-w11/T72/UP2001/bags/subset/'
+    dlc_csv_folder = os.path.join(data_folder, 'mp4')
+    wisci_server_path = '/media/vita-w11/T72/UP2001/WISCI/'
+    log_table_path = os.path.join(data_folder, 'sync_log.csv')
+    sync_images_folder = os.path.join(data_folder, 'sync_images')
     sigma_video = 10
     sigma_wisci = 200
     visualize = False

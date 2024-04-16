@@ -72,12 +72,13 @@ class LedSynchronizer:
 
             resampled_video = resample(forehead, int(n_samples))
 
-            corr, lag = self.synchronize_by_LED(accelerometer_data, resampled_video)
+            corr, lag, corr_array = self.synchronize_by_LED(accelerometer_data, resampled_video)
             corrs.append(corr)
             if corr > best_corr:
                 best_corr, best_lag = corr, lag
                 best_signal = resampled_video
                 best_n_samples = n_samples
+                best_corr_array = corr_array
     
         resampled_video = resample(forehead, int(best_n_samples))
         if self.sync_images_folder is not None and original_mp4_basename is not None:
@@ -123,8 +124,20 @@ class LedSynchronizer:
             ax.legend()
             plt.savefig(os.path.join(self.sync_images_folder, original_mp4_basename[:-4] + "_whole.png"))
 
+            plt.figure()
+            plt.plot(best_corr_array)
+            plt.savefig(os.path.join(self.sync_images_folder, original_mp4_basename[:-4] + "_corr.png"))
 
-        return best_corr, best_lag
+        peaks, _ = find_peaks(best_corr_array, height=0.5*np.max(best_corr_array), distance=585*2) # TODO: fix distance by the freq
+        second_largest_corr_peak = 0
+        if len(peaks) < 2:
+            second_largest_corr_peak = 0
+        else:
+            peak_values = np.abs(best_corr_array)[peaks]
+            sorted_unique_peak_values = np.sort(np.unique(peak_values))
+            second_largest_corr_peak = sorted_unique_peak_values[-2]
+
+        return best_corr, best_lag, best_n_samples, len(peaks), second_largest_corr_peak
     
     
     def sync_with_led(self, mp4_basename, duration_full_path, led_signal_full_path, wisci_file, log=True, output_path_manual=None):
@@ -145,14 +158,15 @@ class LedSynchronizer:
         wisci_data = wisci_data / np.max(wisci_data) - 0.5
 
         if video_duration > 15: # process videos that are at least 15s long
-            best_corr, best_lag = self.sync_and_optimize_freq(wisci_data, video_led, wisci_duration, video_duration, mp4_basename)
+            best_corr, best_lag, best_n_samples, best_total_peaks, best_second_largest_corr_peak = self.sync_and_optimize_freq(wisci_data, video_led, wisci_duration, video_duration, mp4_basename)
             print(f"Going to update log")
             print(f"File: {mp4_basename}")
             print(f"\tBest correlation: {best_corr}\n\tLag: {best_lag}")
             sync_failed = 0
 
         else:
-            best_corr, best_lag = -1, -1
+            best_corr, best_lag, best_n_samples, best_total_peaks, best_second_largest_corr_peak = -1, -1, -1, -1, -1
+
             sync_failed = 1
             self.log.update_log(mp4_basename, 'video_duration', video_duration)
             self.log.update_log(mp4_basename, 'sync_error_msg', "Video too short (under 15s).")
@@ -160,11 +174,13 @@ class LedSynchronizer:
 
         if log:
             self.log.update_log(mp4_basename, 'video_duration', video_duration)
+            self.log.update_log(mp4_basename, 'frames', best_n_samples)
             self.log.update_log(mp4_basename, 'path_wisci', wisci_file)
             self.log.update_log(mp4_basename, 'corr', best_corr)
             self.log.update_log(mp4_basename, 'lag', best_lag)
             self.log.update_log(mp4_basename, 'sync_failed', sync_failed)
-            self.log.save_to_csv()
+            self.log.update_log(mp4_basename, 'additional_peaks_per_million', (best_total_peaks-1)/len(wisci_data) * 1000000)
+            self.log.update_log(mp4_basename, 'best_second_largest_corr_peak', best_second_largest_corr_peak)
         else:
             # write the logs into a file logs_manual.txt in the output_path_manual (but if the file exists, append to it)
             with open(os.path.join(output_path_manual, 'logs_manual.txt'), 'a') as f:
@@ -251,16 +267,17 @@ class LedSynchronizer:
                 fig.add_trace(go.Scatter(x=np.arange(len(normalized_sig2)) + lag, y=-normalized_sig2, mode='lines', name='From video', line=dict(color='blue')))
             fig.show()
 
-        return np.max(np.abs(correlation)), lag
+        return np.max(np.abs(correlation)), lag, np.abs(correlation)
     
 
 if __name__=="__main__":
 
     # data_folder = "/media/vita-w11/T71/UP2001/"
     data_folder = '/home/vita-w11/mpicek/data/'
+    data_folder = '/media/vita-w11/T71/UP2001/bags/subset/'
     mp4_folder = os.path.join(data_folder, 'mp4')
     led_signals_folder = os.path.join(data_folder, 'led_signals')
-    wisci_server_path = os.path.join(data_folder, 'WISCI')
+    wisci_server_path = '/media/vita-w11/T71/UP2001/WISCI/'
     log_table_path = os.path.join(data_folder, 'sync_log_led.csv')
     sync_images_folder = os.path.join(data_folder, 'sync_images_led')
     sigma_video = 10
