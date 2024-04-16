@@ -23,6 +23,7 @@ class SyncLogger:
             'sync_error_msg',
             'best_second_largest_corr_peak',
             'sync_failed',
+            'avg_quality',
         ]
 
         if os.path.exists(log_table_path):

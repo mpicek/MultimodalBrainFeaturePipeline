@@ -152,6 +152,7 @@ class ParallelSynchronizer:
         accelerometer_data = preprocess_accelerometer_data(accelerometer_data, self.sigma_wisci)
 
         forehead, quality = extract_movement_from_dlc_csv(csv_full_path)
+        avg_quality = np.mean(quality)
         video_duration = np.load(csv_full_path[:-len(self.dlc_suffix)] + '_duration.npy')
 
         if video_duration > 15: # process videos that are at least 15s long
@@ -180,6 +181,8 @@ class ParallelSynchronizer:
                 log.update_log(original_mp4_basename, 'additional_peaks_per_million', (best_total_peaks - 1)/len(accelerometer_data) * 1000000)
                 log.update_log(original_mp4_basename, 'best_second_largest_corr_peak', best_second_largest_corr_peak)
                 log.update_log(original_mp4_basename, 'sync_failed', sync_failed)
+                log.update_log(original_mp4_basename, 'avg_quality', avg_quality)
+
         else:
             # write the logs into a file logs_manual.txt in the output_path_manual (but if the file exists, append to it)
             with self.lock:
