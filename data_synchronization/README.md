@@ -2,13 +2,13 @@
 
 ### Prerequisite: A Trained DLC Network
 
-
 #### 0a. Extract the dataset for DLC training (DLC/extract_frames_for_dataset.py)
 
-#### 0b. Train the DLC network (DLC/dlc_train_network.ipynb)
+#### 0b. Train the DLC network (DLC/train_network.ipynb)
 
 
-## Pipeline
+# Pipeline
+
 
 #### 1. Download .bag files and the corresponding wisci (to bags/ and wisci/)
 
@@ -16,14 +16,25 @@
 
 Batch conversion. Appends to the log table if exists. Skips already converted videos (found by basename, not full path).
 
-#### 3. Extract movement from the videos (DLC/dlc_analyze_video.py)
+## Movement synchronization
+
+#### 1. Extract movement from the videos (DLC/analyze_video.py)
 
 Into `mp4` folder. Skips already analyzed videos in that folder
 
-#### OPTIONAL: Extract LED signal from the .mp4 videos (extract_LED_position.py, then get_LED_signal.py)
+#### 2. Synchronize the movement from videos with WISCI files (Synchronizer.py or ParallelSynchronizer.py for parallel processing)
 
-#### 4. Synchronize the movement from videos with WISCI files (Synchronizer.py)
+## LED Synchronization
 
-#### OPTIONAL: Synchronize the LED signal with WISCI files (LedSynchronizer.py)
+#### 1. Extract LED positions from the videos (extract_LED_position.py)
 
-#### OPTIONAL: Compare the LED sync with the movement sync (led_acc_comparison.ipynb)
+#### 2. Extract LED signal from the .mp4 videos (get_LED_signal.py)
+
+#### 3. Synchronize the LED signal with WISCI files (LEDSynchronizer.py)
+
+#### 4. Quality Control: Manually filter properly synchronized data with LED (LED_sync_quality_test.py)
+
+Notes into log file into a column passed_quality_test whether it passed the quality test.
+It will create the column if doesn't exist yet.
+ - to mark that the sync passed the test, press right arrow
+ - to mark that the sync did not pass the test, press left arrow

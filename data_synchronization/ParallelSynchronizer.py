@@ -44,7 +44,7 @@ class ParallelSynchronizer:
         self.sigma_wisci = sigma_wisci
         self.visualize = visualize
         self.dlc_csv_folder = dlc_csv_folder
-        self.dlc_suffix = 'DLC_resnet50_UP2_movement_syncApr15shuffle1_275000.csv'
+        self.dlc_suffix = 'DLC_resnet50_UP2_movement_syncApr15shuffle1_525000.csv'
         self.sync_images_folder = sync_images_folder
         self.lock = None
 
