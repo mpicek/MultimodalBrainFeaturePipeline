@@ -13,7 +13,7 @@ def main():
     parser.add_argument("mp4_folder", help="Path to the folder containing .mp4 files.")
     args = parser.parse_args()
 
-    config_path = '/data/UP2_synchronization_videos_concatenated-mpicek-2024-03-20_2/config.yaml'
+    config_path = '/mpicek/dlc_nose_detector/UP2_movement_sync-mpicek-2024-04-15/config.yaml'
     print(f"THE FOLLOWING CONFIG WILL BE USED:")
     print(config_path)
 
