@@ -8,7 +8,6 @@ import matplotlib.pyplot as plt
 import os
 import subprocess
 import shutil
-from mediapipe_utils import *
 from synchronization_utils import *
 import argparse
 import pandas as pd

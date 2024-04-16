@@ -7,11 +7,10 @@ from scipy import signal
 from scipy.signal import find_peaks
 from synchronization_utils import preprocess_accelerometer_data, preprocess_video_signals, extract_movement_from_dlc_csv
 from SyncLogger import SyncLogger, FileAlreadySynchronized
-from accelerometer import get_accelerometer_data, GettingAccelerometerDataFailed
+from wisci_utils import get_accelerometer_data, GettingAccelerometerDataFailed, find_corresponding_wisci
 import traceback
 from scipy.signal import resample
 from tqdm import tqdm
-from find_corresponding_wisci import find_corresponding_wisci
 
 class Synchronizer:
     """

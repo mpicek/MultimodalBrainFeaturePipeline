@@ -3,7 +3,6 @@ import numpy as np
 import os
 import pyrealsense2 as rs
 import cv2
-from mediapipe_utils import *
 import ffmpegio
 import argparse
 

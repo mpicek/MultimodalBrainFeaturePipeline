@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from scipy.ndimage import gaussian_filter
 def smooth(y, box_pts):
     return gaussian_filter(y, box_pts)
-from accelerometer import get_LED_data
+from wisci_utils import get_LED_data
 from LED_utils import get_LED_signal_from_video, get_LED_mask, get_LED_signal_from_video
 from LED_video_main import crop_subsampled_LED_red_channel_from_video_for_std
 from LED_GUI_cropper import ImageCropper
