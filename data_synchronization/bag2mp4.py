@@ -195,7 +195,7 @@ def create_videos_from_bag(path_bag, output_folder):
         pipeline.stop()
         cv2.destroyAllWindows()
     
-    return prev_ts / 1000, failed, len(time_series), problematic_frames
+    return prev_ts / 1000, failed, problematic_frames
 
 
 def bag2mp4(path_bag, output_folder):
@@ -208,7 +208,7 @@ def bag2mp4(path_bag, output_folder):
         shutil.rmtree(tmp_folder)
     os.makedirs(tmp_folder)
 
-    duration, failed, num_frames, problematic_frames = create_videos_from_bag(path_bag, tmp_folder)
+    duration, failed, problematic_frames = create_videos_from_bag(path_bag, tmp_folder)
     np.save(os.path.join(output_folder, os.path.basename(path_bag)[:-4] + '_duration.npy'), duration)
 
     # List all mp4 files in the current directory alphabetically
@@ -246,7 +246,7 @@ def bag2mp4(path_bag, output_folder):
     if os.path.exists(tmp_folder):
         shutil.rmtree(tmp_folder)
     
-    return duration, failed, num_frames, problematic_frames
+    return duration, failed, problematic_frames
 
 def bag_folder2mp4(bag_folder, output_folder, log_table_path):
     """
@@ -261,7 +261,7 @@ def bag_folder2mp4(bag_folder, output_folder, log_table_path):
     if os.path.exists(log_table_path):
         log_df = pd.read_csv(log_table_path)
     else:
-        log_df = pd.DataFrame(columns=['bag_path', 'failed', 'duration', 'num_frames', 'calculated_duration', 'problematic_frames', 'mp4_name'])
+        log_df = pd.DataFrame(columns=['bag_path', 'failed', 'duration', 'problematic_frames', 'mp4_name'])
 
     num_rows = len(log_df)
 
@@ -279,13 +279,11 @@ def bag_folder2mp4(bag_folder, output_folder, log_table_path):
                     print(f"Skipping {bag_path} as it has already been processed.")
                     continue
 
-                duration, failed, num_frames, problematic_frames = bag2mp4(bag_path, output_folder)
+                duration, failed, problematic_frames = bag2mp4(bag_path, output_folder)
                 log_df.loc[file_counter] = [
                     bag_path,
                     failed,
                     duration,
-                    num_frames,
-                    num_frames/30,
                     problematic_frames,
                     os.path.basename(bag_path)[:-4] + '.mp4'
                 ]
