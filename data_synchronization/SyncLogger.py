@@ -21,7 +21,6 @@ class SyncLogger:
             'corr',
             'lag',
             'sync_error_msg',
-            'peaks_per_million',
             'best_second_largest_corr_peak',
             'sync_failed',
         ]
