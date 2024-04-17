@@ -15,7 +15,7 @@ from LED_GUI_cropper import ImageCropper
 from LED_video_main import crop_subsampled_LED_red_channel_from_video_for_std
 
 
-def extract_led_position_folder(mp4_folder, downscale_factor, downsample_frames_factor):
+def extract_led_position_folder(mp4_folder, output_folder, downscale_factor, downsample_frames_factor):
 
     processed_files = os.listdir(mp4_folder)
     processed_mp4_files = [os.path.basename(file)[:-len('_LED_position.npy')] + '.mp4' for file in processed_files if file.endswith('_LED_position.npy')]
@@ -39,11 +39,11 @@ def extract_led_position_folder(mp4_folder, downscale_factor, downsample_frames_
                 binary_mask = np.full((subsampled_video_array.shape[1], subsampled_video_array.shape[2]), True)
 
                 mp4_basename = os.path.basename(path_mp4)[:-4]
-                np.save(os.path.join(mp4_folder, mp4_basename + '_LED_position.npy'), ref_point)
-                np.save(os.path.join(mp4_folder, mp4_basename + '_LED_binary_mask.npy'), binary_mask)
+                np.save(os.path.join(output_folder, mp4_basename + '_LED_position.npy'), ref_point)
+                np.save(os.path.join(output_folder, mp4_basename + '_LED_binary_mask.npy'), binary_mask)
 
 
-def main(mp4_folder):
+def main(mp4_folder, output_folder):
 
     # if we want to process just one file (in that case args.mp4_folder has to be a path to the file)
     # average_values = mp4_get_LED_signal(args.mp4_folder)
@@ -56,11 +56,17 @@ def main(mp4_folder):
     downscale_factor = 2
     downsample_frames_factor = 1
 
-    extract_led_position_folder(mp4_folder, downscale_factor, downsample_frames_factor)
+    extract_led_position_folder(mp4_folder, output_folder, downscale_factor, downsample_frames_factor)
 
 if __name__ == "__main__":
     # Argument parser setup
     parser = argparse.ArgumentParser(description="Extract the LED signals from .mp4 files.")
     parser.add_argument("mp4_folder", help="Path to the folder containing mp4 files.")
+    parser.add_argument("output_folder", help="Where to put output.")
+
     args = parser.parse_args()
-    main(args.mp4_folder)
+
+    if not os.path.exists(args.output_folder):
+        os.makedirs(args.output_folder)
+
+    main(args.mp4_folder, args.output_folder)
