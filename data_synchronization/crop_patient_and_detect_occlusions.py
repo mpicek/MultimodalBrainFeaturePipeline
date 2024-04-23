@@ -16,6 +16,7 @@ def process_video(video_path, model, analyzed_seconds=13, fps=30):
     frame_nb = 1
     fps = 30
 
+    # bounding boxes (and corresponding patient ids) for each frame
     bounding_boxes, patient_ids = [], []
     video_height, video_width = None, None
     example_frame = None
@@ -24,27 +25,27 @@ def process_video(video_path, model, analyzed_seconds=13, fps=30):
         success, frame = cap.read()
 
         if success == True:
-            if frame_nb % 30 == 0:
-                example_frame = frame
-                video_height = frame.shape[0]
-                video_width = frame.shape[1]
+            # if frame_nb % 30 == 0:
+            example_frame = frame
+            video_height = frame.shape[0]
+            video_width = frame.shape[1]
 
-                # persist .. to take into account temporal information from the previous frames
-                # classes=[0] .. to track only the person class
-                results = model.track(frame, persist=True, classes=[0], verbose=False)
+            # persist .. to take into account temporal information from the previous frames
+            # classes=[0] .. to track only the person class
+            results = model.track(frame, persist=True, classes=[0], verbose=False)
 
-                try:
-                    boxes = results[0].boxes.xyxy.cpu()
-                    track_ids = results[0].boxes.id.int().cpu().tolist()
-                    bounding_boxes.append(boxes)
-                    patient_ids.append(track_ids)
-                except:
-                    pass
+            try:
+                boxes = results[0].boxes.xyxy.cpu()
+                track_ids = results[0].boxes.id.int().cpu().tolist()
+                bounding_boxes.append(boxes)
+                patient_ids.append(track_ids)
+            except:
+                pass
         else:
             break
-        frame_nb += 1
-        if frame_nb > analyzed_seconds * fps:
-            break
+        # frame_nb += 1
+        # if frame_nb > analyzed_seconds * fps:
+        #     break
     cap.release()
 
     return bounding_boxes, patient_ids, video_height, video_width, example_frame
@@ -101,15 +102,16 @@ def get_patients_bounding_box(bounding_boxes, patient_ids, video_height, video_w
     if patient_id is None:
         raise NoPatientDetectedError("No person is at the location of the detected patient's nose.")
 
-    patient_bb = peoples_avg_bbs[patient_id]
+    patient_bb = peoples_avg_bbs[patient_id].copy()
+    patient_bb_small = peoples_avg_bbs[patient_id].copy()
     coef_width = 0.3
     coef_height = 0.2
-    patient_bb[0] = max(0, patient_bb[0] - coef_width * patient_width)
-    patient_bb[1] = max(0, patient_bb[1] - coef_height * patient_height)
-    patient_bb[2] = min(video_width, patient_bb[2] + coef_width * patient_width)
-    patient_bb[3] = min(video_height, patient_bb[3] + coef_height * patient_height)
+    patient_bb[0] = int(max(0, patient_bb[0] - coef_width * patient_width))
+    patient_bb[1] = int(max(0, patient_bb[1] - coef_height * patient_height))
+    patient_bb[2] = int(min(video_width, patient_bb[2] + coef_width * patient_width))
+    patient_bb[3] = int(min(video_height, patient_bb[3] + coef_height * patient_height))
 
-    return patient_bb
+    return patient_bb, patient_bb_small, patient_id
 
 
 
@@ -134,10 +136,26 @@ def main(mp4_folder, dlc_folder, extraction_folder, log_table, DLC_suffix, analy
         dlc_csv_path = os.path.join(dlc_folder, mp4_basename + DLC_suffix)
         average_nose_x, average_nose_y = get_nose_position_from_DLC(dlc_csv_path)
         try:
-            bounding_box = get_patients_bounding_box(bounding_boxes, patient_ids, video_height, video_width, average_nose_x, average_nose_y)
+            bounding_box, patient_bb_small, patient_id = get_patients_bounding_box(bounding_boxes, patient_ids, video_height, video_width, average_nose_x, average_nose_y)
             cropped = example_frame[int(bounding_box[1]):int(bounding_box[3]), int(bounding_box[0]):int(bounding_box[2])]
+            bounding_box = bounding_box.astype(int)
             np.save(os.path.join(extraction_folder, mp4_basename + '_bounding_box.npy'), bounding_box)
             cv2.imwrite(os.path.join(extraction_folder, mp4_basename + '_cropped.png'), cropped)
+
+            ################### DETECT OCCLUSIONS ###################
+            occlusion = []
+            # go over all frames and set occlusion to 1 when the patient_id's bounding box overlaps with another patient
+            for f in range(len(bounding_boxes)):
+                occlusion.append(0)
+                for i in range(len(bounding_boxes[f])):
+                    patient_index = patient_ids[f].index(patient_id)
+                    if i != patient_index:
+                        left1, top1, right1, bottom1 = bounding_boxes[f][patient_index]
+                        left2, top2, right2, bottom2 = bounding_boxes[f][i]
+
+                        if (left1 < right2) and (right1 > left2) and (top1 < bottom2) and (bottom1 > top2):
+                            occlusion[f] = 1
+                            break
         except NoPatientDetectedError as e:
             continue
 
