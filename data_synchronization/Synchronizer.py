@@ -11,6 +11,7 @@ from wisci_utils import get_accelerometer_data, GettingAccelerometerDataFailed, 
 import traceback
 from scipy.signal import resample
 from tqdm import tqdm
+import argparse
 
 class Synchronizer:
     """
@@ -318,24 +319,16 @@ class Synchronizer:
 
 if __name__=="__main__":
 
-    # data_folder = "/media/vita-w11/T71/UP2001/"
-    data_folder = '/home/vita-w11/mpicek/data/'
-    dlc_csv_folder = os.path.join(data_folder, 'mp4')
-    wisci_server_path = os.path.join(data_folder, 'WISCI')
-    log_table_path = os.path.join(data_folder, 'sync_log.csv')
-    sync_images_folder = os.path.join(data_folder, 'sync_images')
-
-
-
-
-    data_folder = '/media/vita-w11/T72/UP2001/bags/subset/'
-    dlc_csv_folder = os.path.join(data_folder, 'mp4')
-    wisci_server_path = '/media/vita-w11/T72/UP2001/WISCI/'
-    log_table_path = os.path.join(data_folder, 'sync_log.csv')
-    sync_images_folder = os.path.join(data_folder, 'sync_images')
     sigma_video = 10
     sigma_wisci = 200
     visualize = False
 
-    synchronizer = Synchronizer(dlc_csv_folder, wisci_server_path, log_table_path, sigma_video, sigma_wisci, sync_images_folder, visualize)
+    parser = argparse.ArgumentParser(description="Synchronize Realsense and WiSci data using movement.")
+    parser.add_argument("dlc_csv_folder", help="Path to the folder containing .csv files from DLC.")
+    parser.add_argument("wisci_folder", help="Path to the folder with WISCI .mat files.")
+    parser.add_argument("log_table_path", help="Where to log the synchronization.")
+    parser.add_argument("sync_images_path", help="Where to store the logs of the synchronization.")
+    args = parser.parse_args()
+
+    synchronizer = Synchronizer(args.dlc_csv_folder, args.wisci_folder, args.log_table_path, sigma_video, sigma_wisci, args.sync_images_path, visualize)
     synchronizer.sync_mp4_folder()

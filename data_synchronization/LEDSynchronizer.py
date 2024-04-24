@@ -11,6 +11,7 @@ from wisci_utils import get_accelerometer_data, GettingAccelerometerDataFailed, 
 import traceback
 from scipy.signal import resample
 from tqdm import tqdm
+import argparse
 
 class LedSynchronizer:
     """
@@ -271,17 +272,17 @@ class LedSynchronizer:
 
 if __name__=="__main__":
 
-    # data_folder = "/media/vita-w11/T71/UP2001/"
-    data_folder = '/home/vita-w11/mpicek/data/'
-    data_folder = '/media/vita-w11/T71/UP2001/bags/subset/'
-    mp4_folder = os.path.join(data_folder, 'mp4')
-    led_signals_folder = os.path.join(data_folder, 'led_signals')
-    wisci_server_path = '/media/vita-w11/T71/UP2001/WISCI/'
-    log_table_path = os.path.join(data_folder, 'sync_log_led.csv')
-    sync_images_folder = os.path.join(data_folder, 'sync_images_led')
     sigma_video = 10
     sigma_wisci = 200
     visualize = False
 
-    synchronizer = LedSynchronizer(mp4_folder, led_signals_folder, wisci_server_path, log_table_path, sync_images_folder, visualize)
+    parser = argparse.ArgumentParser(description="Synchronize WiSci and Realsense data using the LED signals.")
+    parser.add_argument("mp4_folder", help="Path to the folder containing mp4 files.")
+    parser.add_argument("led_signals_folder", help="Path to the folder containing led position .npy files.")
+    parser.add_argument("wisci_folder", help="Path to the folder with WISCI .mat files.")
+    parser.add_argument("log_table_path", help="Where to log the synchronization.")
+    parser.add_argument("sync_images_path", help="Where to store the logs of the synchronization.")
+    args = parser.parse_args()
+
+    synchronizer = LedSynchronizer(args.mp4_folder, args.led_signals_folder, args.wisci_folder, args.log_table_path, args.sync_images_path, visualize)
     synchronizer.sync_mp4_folder()
