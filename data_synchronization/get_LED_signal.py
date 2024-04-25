@@ -34,7 +34,7 @@ def mp4_get_LED_signal(path_mp4, led_position=None, binary_mask=None):
     return average_values
 
 
-def mp4_folder_get_LED(mp4_folder, output_folder):
+def mp4_folder_get_LED(mp4_folder, led_position_folder, output_folder):
 
     # create the output_folder if it doesn't exist
     if not os.path.exists(output_folder):
@@ -54,8 +54,8 @@ def mp4_folder_get_LED(mp4_folder, output_folder):
 
                 print("Processing file:", path_mp4)
                 try: # this fails if there is no led_position and binary_mask files => we have to select it manually now
-                    led_position = np.load(os.path.join(mp4_folder, os.path.basename(path_mp4)[:-4] + '_LED_position.npy'))
-                    binary_mask = np.load(os.path.join(mp4_folder, os.path.basename(path_mp4)[:-4] + '_LED_binary_mask.npy'))
+                    led_position = np.load(os.path.join(led_position_folder, os.path.basename(path_mp4)[:-4] + '_LED_position.npy'))
+                    binary_mask = np.load(os.path.join(led_position_folder, os.path.basename(path_mp4)[:-4] + '_LED_binary_mask.npy'))
                     led_signal = mp4_get_LED_signal(path_mp4, led_position, binary_mask)
                 except Exception as e:
                     led_signal = mp4_get_LED_signal(path_mp4)
@@ -64,7 +64,7 @@ def mp4_folder_get_LED(mp4_folder, output_folder):
                 np.save(os.path.join(output_folder, mp4_basename + '_LED_signal.npy'), led_signal)
 
 
-def main(mp4_folder, output_folder):
+def main(mp4_folder, led_position_folder, output_folder):
 
     # if we want to process just one file (in that case args.mp4_folder has to be a path to the file)
     # average_values = mp4_get_LED_signal(args.mp4_folder)
@@ -75,12 +75,13 @@ def main(mp4_folder, output_folder):
     # plt.title('Average pixel value over time')
     # plt.show()
 
-    mp4_folder_get_LED(mp4_folder, output_folder)
+    mp4_folder_get_LED(mp4_folder, led_position_folder, output_folder)
 
 if __name__ == "__main__":
     # Argument parser setup
     parser = argparse.ArgumentParser(description="Extract the LED signals from .mp4 files.")
     parser.add_argument("mp4_folder", help="Path to the folder containing mp4 files.")
+    parser.add_argument("led_position_folder", help="Path to the folder containing led position .npy files.")
     parser.add_argument("output_folder", help="Path to the output folder LED signals.")
     args = parser.parse_args()
-    main(args.mp4_folder, args.output_folder)
+    main(args.mp4_folder, args.led_position_folder, args.output_folder)

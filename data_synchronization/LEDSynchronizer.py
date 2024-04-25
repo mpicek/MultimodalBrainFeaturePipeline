@@ -55,8 +55,6 @@ class LedSynchronizer:
 
         wisci_freq = len(accelerometer_data) / accelerometer_duration
         video_freq = len(forehead) / video_duration
-        print("Frequencies - Wisci: ", wisci_freq, ", Video: ", video_freq)
-        print(f"Old video frames: {len(forehead)}")
 
         # upsample the video to the wisci frequency
         new_num_samples = int(len(forehead) * (wisci_freq / video_freq))
@@ -71,6 +69,7 @@ class LedSynchronizer:
         for n_samples in tqdm(np.linspace(new_num_samples - 2000, new_num_samples + 2000, 250)):
 
             resampled_video = resample(forehead, int(n_samples))
+            # plot both signals
 
             corr, lag, corr_array = self.synchronize_by_LED(accelerometer_data, resampled_video)
             corrs.append(corr)

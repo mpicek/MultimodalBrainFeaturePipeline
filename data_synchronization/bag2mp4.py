@@ -43,6 +43,8 @@ def create_videos_from_bag(path_bag, output_folder):
     img_height = 480
     img_width = 640
 
+    print("Processing: ", path_bag)
+    
     try:
 
         pipeline = rs.pipeline()
@@ -58,7 +60,7 @@ def create_videos_from_bag(path_bag, output_folder):
         duration = playback.get_duration().total_seconds() * 1000
         print(f"Overall video duration: {playback.get_duration()}")
     except Exception as e:
-        return 0, str(e), 0, 0
+        return 0, str(e), 0
     
     # we want to set_real_time to False, so that we can process the frames as slowly as necessary.
     # However, there are errors reading it at the beginning and at the end (hopefully not in the middle)

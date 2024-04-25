@@ -48,13 +48,20 @@ def crop_subsampled_LED_red_channel_from_video_for_std(video_path, n_frames, dow
     frames = []  # List to hold the cut frames
 
     frame_counter = 0
+
+    num_of_frames_of_the_video = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     
     while frame_counter < n_frames:
         ret, frame = cap.read()
         if not ret:
             break  # Break the loop if there are no frames to read
         
+        frame_counter += 1
+        if frame_counter < 30 and n_frames >= 30 and num_of_frames_of_the_video >= 30:
+            continue
+
         if len(frames) == 0:
+            frame_counter = 0
             # Create an ImageCropper object
             cropper = ImageCropper(frame)
             cropped_LED_image_colorful, ref_point = cropper.show_and_crop_image()
@@ -66,7 +73,6 @@ def crop_subsampled_LED_red_channel_from_video_for_std(video_path, n_frames, dow
             # Append the resized frame to the list
             frames.append(cropped[..., 2][::downscale_factor, ::downscale_factor]) # only red channel of the array
     
-        frame_counter += 1
 
     # Stack the frames into a single array
     subsampled_video_array = np.stack(frames, axis=0)

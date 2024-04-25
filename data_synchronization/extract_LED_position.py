@@ -17,7 +17,7 @@ from LED_video_main import crop_subsampled_LED_red_channel_from_video_for_std
 
 def extract_led_position_folder(mp4_folder, output_folder, downscale_factor, downsample_frames_factor):
 
-    processed_files = os.listdir(mp4_folder)
+    processed_files = os.listdir(output_folder)
     processed_mp4_files = [os.path.basename(file)[:-len('_LED_position.npy')] + '.mp4' for file in processed_files if file.endswith('_LED_position.npy')]
 
     for root, _, files in os.walk(mp4_folder):
@@ -28,10 +28,11 @@ def extract_led_position_folder(mp4_folder, output_folder, downscale_factor, dow
                 if os.path.basename(path_mp4) in processed_mp4_files:
                     print(f"File {path_mp4} already processed. Skipping")
                     continue
+                print("Processing file:", path_mp4)
 
                 subsampled_video_array, ref_point, _ = crop_subsampled_LED_red_channel_from_video_for_std(
                     path_mp4,
-                    10,
+                    40,
                     downscale_factor,
                     downsample_frames_factor
                 )

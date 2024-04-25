@@ -42,8 +42,16 @@ class ImageCropper:
             self.ref_point.append((x, y))
             self.cropping = False
 
+            new_ref_point = [[min(self.ref_point[0][0], self.ref_point[1][0]),
+                              min(self.ref_point[0][1], self.ref_point[1][1])],
+                              [max(self.ref_point[0][0], self.ref_point[1][0]),
+                              max(self.ref_point[0][1], self.ref_point[1][1])]]
+            
+            self.ref_point = new_ref_point
+            
+
             # Draw a rectangle around the region of interest
-            cv2.rectangle(self.image, self.ref_point[0], self.ref_point[1], (0, 255, 0), 2)
+            cv2.rectangle(self.image, self.ref_point[0], self.ref_point[1], (0, 255, 0), 1)
             cv2.imshow("Select area and press 'c' to continue (or 'r' to reset the area)", self.image)
 
     def show_and_crop_image(self):
