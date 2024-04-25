@@ -88,9 +88,14 @@ def find_corresponding_wisci(mp4_filename, wisci_path):
     def extract_datetime(mat_filename):
         mat_datetime = re.search(r'(\d{4}_\d{2}_\d{2}_\d{2}_\d{2})', mat_filename).group(0)
         return datetime.strptime(mat_datetime, '%Y_%m_%d_%H_%M')
-    
-    # Filter .mat files based on datetime
-    valid_mat_files = [(mat_file, extract_datetime(mat_file)) for mat_file in mat_files]
+
+    # Filter out invalid .mat files that don't contain datetime    
+    valid_mat_files = []
+    for mat_file in mat_files:
+        try:
+            valid_mat_files.append((mat_file, extract_datetime(mat_file)))
+        except:
+            pass
 
     valid_mat_files.sort(key=lambda x: x[1])  # Sort by datetime
 
