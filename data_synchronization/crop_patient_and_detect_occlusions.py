@@ -1,3 +1,13 @@
+###############################################################################################
+#
+# Does not log anything. If the patient is not found, the bounding box is just not created.
+# Finds patient in the video based on the detection with YOLO and the nose position from DLC
+# Skips files that have already been processed (based on the existence of the _bounding_box.npy file)
+# Saves the bounding box of the patient and the cropped image (for visualization)
+# Then detects occlusions (when the patient's bounding box is overlapping with another person's bounding box) 
+#
+###############################################################################################
+
 from ultralytics import YOLO
 import pandas as pd
 import numpy as np
@@ -10,45 +20,55 @@ from tqdm import tqdm
 class NoPatientDetectedError(Exception):
     pass
 
-def process_video(video_path, model, analyzed_seconds=13, fps=30):
+def count_frames(video_path):
     cap = cv2.VideoCapture(video_path)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    cap.release()
+    return total_frames
 
-    frame_nb = 1
-    fps = 30
+def process_video(video_path, model, analyze_every_n_frame=15):
+
+    total_frames = count_frames(video_path)
+    progress_bar = tqdm(total=total_frames / analyze_every_n_frame, desc="Processing frames", unit="frame")
+
+    cap = cv2.VideoCapture(video_path)
 
     # bounding boxes (and corresponding patient ids) for each frame
     bounding_boxes, patient_ids = [], []
     video_height, video_width = None, None
     example_frame = None
 
+    frame_nb = -1
+
     while cap.isOpened():
         success, frame = cap.read()
 
         if success == True:
-            # if frame_nb % 30 == 0:
-            example_frame = frame
-            video_height = frame.shape[0]
-            video_width = frame.shape[1]
+            frame_nb += 1
+            if frame_nb % analyze_every_n_frame == 0:
+                progress_bar.update(1)
+                example_frame = frame
+                video_height = frame.shape[0]
+                video_width = frame.shape[1]
 
-            # persist .. to take into account temporal information from the previous frames
-            # classes=[0] .. to track only the person class
-            results = model.track(frame, persist=True, classes=[0], verbose=False)
+                # persist .. to take into account temporal information from the previous frames
+                # classes=[0] .. to track only the person class
+                results = model.track(frame, persist=True, classes=[0], verbose=False)
 
-            try:
-                boxes = results[0].boxes.xyxy.cpu()
-                track_ids = results[0].boxes.id.int().cpu().tolist()
-                bounding_boxes.append(boxes)
-                patient_ids.append(track_ids)
-            except:
-                pass
+                try:
+                    boxes = results[0].boxes.xyxy.cpu()
+                    track_ids = results[0].boxes.id.int().cpu().tolist()
+                    bounding_boxes.append(boxes)
+                    patient_ids.append(track_ids)
+                except:
+                    pass
         else:
             break
-        # frame_nb += 1
-        # if frame_nb > analyzed_seconds * fps:
-        #     break
+
+    progress_bar.close()
     cap.release()
 
-    return bounding_boxes, patient_ids, video_height, video_width, example_frame
+    return bounding_boxes, patient_ids, video_height, video_width, example_frame, frame_nb
 
 def get_nose_position_from_DLC(dlc_path):
 
@@ -117,21 +137,20 @@ def get_patients_bounding_box(bounding_boxes, patient_ids, video_height, video_w
 
 def main(mp4_folder, dlc_folder, extraction_folder, log_table, DLC_suffix, analyzed_seconds, fps):
     model = YOLO('yolov8n.pt')
+    analyze_every_n_frame = 15
     
-    log_table = pd.read_csv(log_table)
+    for mp4_name in os.listdir(mp4_folder):
+        if not mp4_name.endswith('.mp4'):
+            continue
 
-    # if column "patient_bb" is not in the log table, add it
-    if 'patient_bb' not in log_table.columns:
-        log_table['patient_bb'] = None
-    
-    # go over mp4_name in log table that have sync_failed == 0
-    for mp4_name in tqdm(log_table.loc[log_table['sync_failed'] == 0, 'mp4_name']):
         mp4_basename = mp4_name[:-4]
         if os.path.exists(os.path.join(extraction_folder, mp4_basename + '_bounding_box.npy')):
             print(f"File {mp4_name} already processed. Skipping")
             continue
+
+        print("Processing file:", mp4_name)
         path_mp4 = os.path.join(mp4_folder, mp4_name)
-        bounding_boxes, patient_ids, video_height, video_width, example_frame = process_video(path_mp4, model, analyzed_seconds, fps)
+        bounding_boxes, patient_ids, video_height, video_width, example_frame, num_frames = process_video(path_mp4, model, analyze_every_n_frame=analyze_every_n_frame)
 
         dlc_csv_path = os.path.join(dlc_folder, mp4_basename + DLC_suffix)
         average_nose_x, average_nose_y = get_nose_position_from_DLC(dlc_csv_path)
@@ -148,16 +167,21 @@ def main(mp4_folder, dlc_folder, extraction_folder, log_table, DLC_suffix, analy
             for f in range(len(bounding_boxes)):
                 occlusion.append(0)
                 for i in range(len(bounding_boxes[f])):
-                    patient_index = patient_ids[f].index(patient_id)
-                    if i != patient_index:
-                        left1, top1, right1, bottom1 = bounding_boxes[f][patient_index]
+                    if patient_ids[f][i] != patient_id:
+                        left1, top1, right1, bottom1 = patient_bb_small
                         left2, top2, right2, bottom2 = bounding_boxes[f][i]
 
                         if (left1 < right2) and (right1 > left2) and (top1 < bottom2) and (bottom1 > top2):
                             occlusion[f] = 1
                             break
+            # expand the occlusions to be for every frame and not for just every analyzed frame
+            occlusion = np.repeat(occlusion, analyze_every_n_frame)
+            occlusion = occlusion[:num_frames]
+
+            np.save(os.path.join(extraction_folder, mp4_basename + '_occlusion.npy'), occlusion)
         except NoPatientDetectedError as e:
-            continue
+            print(str(e))
+            np.save(os.path.join(extraction_folder, mp4_basename + '_bounding_box.npy'), np.array(None))
 
 
 if __name__ == "__main__":
