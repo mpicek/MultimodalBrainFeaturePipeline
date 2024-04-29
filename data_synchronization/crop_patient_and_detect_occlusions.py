@@ -1,10 +1,15 @@
 ###############################################################################################
 #
-# Does not log anything. If the patient is not found, the bounding box is just not created.
+# Logs only files that were skipped. We skip a file in the following cases:
+#   - the nose position likelihood is too low (so the patient is not there or he/she is backwards or DLC just didn't detect it) - when likelihood is < 0.4
+#   - no person is at the location of the detected patient's nose
+#   - no people detected in the video
+# If the patient is not found, the bounding box is created with just None value.
 # Finds patient in the video based on the detection with YOLO and the nose position from DLC
-# Skips files that have already been processed (based on the existence of the _bounding_box.npy file)
+# Skips the processing of files that have already been processed (based on the existence of the _bounding_box.npy file or presence in skipped_files.csv)
 # Saves the bounding box of the patient and the cropped image (for visualization)
 # Then detects occlusions (when the patient's bounding box is overlapping with another person's bounding box) 
+# CAREFUL: THE BOUNDING_BOXES MIGHT CONSIST JUST FROM THE NONE VALUE WHEN NO PERSON IS DETECTED
 #
 ###############################################################################################
 
@@ -61,7 +66,8 @@ def process_video(video_path, model, analyze_every_n_frame=15):
                     bounding_boxes.append(boxes)
                     patient_ids.append(track_ids)
                 except:
-                    pass
+                    bounding_boxes.append(None)
+                    patient_ids.append(None)
         else:
             break
 
@@ -72,8 +78,10 @@ def process_video(video_path, model, analyze_every_n_frame=15):
 
 def get_nose_position_from_DLC(dlc_path):
 
-    movement, _ = extract_movement_from_dlc_csv(dlc_path)
+    movement, likelihood = extract_movement_from_dlc_csv(dlc_path)
     avg_x, avg_y = movement.mean(axis=0)
+    if np.mean(likelihood) < 0.4:
+        raise NoPatientDetectedError(f"The average nose position likelihood is too low ({np.mean(likelihood.mean())}).")
     return avg_x, avg_y
 
 def get_patients_bounding_box(bounding_boxes, patient_ids, video_height, video_width, nose_x, nose_y):
@@ -135,7 +143,7 @@ def get_patients_bounding_box(bounding_boxes, patient_ids, video_height, video_w
 
 
 
-def main(mp4_folder, dlc_folder, extraction_folder, log_table, DLC_suffix, analyzed_seconds, fps):
+def main(mp4_folder, dlc_folder, extraction_folder, DLC_suffix, analyzed_seconds, fps):
     model = YOLO('yolov8n.pt')
     analyze_every_n_frame = 15
     
@@ -148,14 +156,34 @@ def main(mp4_folder, dlc_folder, extraction_folder, log_table, DLC_suffix, analy
             print(f"File {mp4_name} already processed. Skipping")
             continue
 
+        # if skipped_files.csv file exists, and the file is in it, skip it
+        if os.path.exists(os.path.join(extraction_folder, 'skipped_files.csv')):
+            with open(os.path.join(extraction_folder, 'skipped_files.csv'), 'r') as f:
+                skipped_files = f.read().splitlines()
+            if mp4_name in skipped_files:
+                print(f"File {mp4_name} is in the skipped files list. Skipping.")
+                continue
+
         print("Processing file:", mp4_name)
         path_mp4 = os.path.join(mp4_folder, mp4_name)
         bounding_boxes, patient_ids, video_height, video_width, example_frame, num_frames = process_video(path_mp4, model, analyze_every_n_frame=analyze_every_n_frame)
 
+        # remove Nones from bounding boxes and patient ids
+        no_None_bounding_boxes = [bb for bb in bounding_boxes if bb is not None]
+        no_None_patient_ids = [ids for ids in patient_ids if ids is not None]
+
         dlc_csv_path = os.path.join(dlc_folder, mp4_basename + DLC_suffix)
-        average_nose_x, average_nose_y = get_nose_position_from_DLC(dlc_csv_path)
         try:
-            bounding_box, patient_bb_small, patient_id = get_patients_bounding_box(bounding_boxes, patient_ids, video_height, video_width, average_nose_x, average_nose_y)
+            average_nose_x, average_nose_y = get_nose_position_from_DLC(dlc_csv_path)
+        except NoPatientDetectedError as e:
+            print(str(e))
+            print(f"Could not find nose position in {dlc_csv_path}. Skipping.")
+            # print skipped files into a log file
+            with open(os.path.join(extraction_folder, 'skipped_files.csv'), 'a') as f:
+                f.write(f"{mp4_name}\n")
+            continue
+        try:
+            bounding_box, patient_bb_small, patient_id = get_patients_bounding_box(no_None_bounding_boxes, no_None_patient_ids, video_height, video_width, average_nose_x, average_nose_y)
             cropped = example_frame[int(bounding_box[1]):int(bounding_box[3]), int(bounding_box[0]):int(bounding_box[2])]
             bounding_box = bounding_box.astype(int)
             np.save(os.path.join(extraction_folder, mp4_basename + '_bounding_box.npy'), bounding_box)
@@ -166,6 +194,9 @@ def main(mp4_folder, dlc_folder, extraction_folder, log_table, DLC_suffix, analy
             # go over all frames and set occlusion to 1 when the patient_id's bounding box overlaps with another patient
             for f in range(len(bounding_boxes)):
                 occlusion.append(0)
+                if bounding_boxes[f] is None:
+                    occlusion[f] = 2 # nobody is in the frame so we mark it as 2 as we don't want to analyze it
+                    continue
                 for i in range(len(bounding_boxes[f])):
                     if patient_ids[f][i] != patient_id:
                         left1, top1, right1, bottom1 = patient_bb_small
@@ -182,6 +213,8 @@ def main(mp4_folder, dlc_folder, extraction_folder, log_table, DLC_suffix, analy
         except NoPatientDetectedError as e:
             print(str(e))
             np.save(os.path.join(extraction_folder, mp4_basename + '_bounding_box.npy'), np.array(None))
+            with open(os.path.join(extraction_folder, 'skipped_files.csv'), 'a') as f:
+                f.write(f"{mp4_name}\n")
 
 
 if __name__ == "__main__":
@@ -190,7 +223,6 @@ if __name__ == "__main__":
     parser.add_argument("mp4_folder", help="Path to the folder containing mp4 files.")
     parser.add_argument("dlc_folder", help="Path to the folder DLC files.")
     parser.add_argument("extraction_folder", help="Path to save the extraction.")
-    parser.add_argument("log_table", help="Path to the log table.")
     args = parser.parse_args()
 
     if not os.path.exists(args.extraction_folder):
@@ -199,4 +231,4 @@ if __name__ == "__main__":
     analyzed_seconds = 13
     fps = 30
     DLC_suffix = 'DLC_resnet50_UP2_movement_syncApr15shuffle1_525000.csv'
-    main(args.mp4_folder, args.dlc_folder, args.extraction_folder, args.log_table, DLC_suffix, analyzed_seconds, fps)
+    main(args.mp4_folder, args.dlc_folder, args.extraction_folder, DLC_suffix, analyzed_seconds, fps)
