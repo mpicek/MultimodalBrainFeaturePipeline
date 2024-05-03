@@ -6,6 +6,16 @@ import plotly.graph_objects as go
 import argparse
 from tqdm import tqdm
 
+################################################################################
+# Preprocess the kinematics signals
+# Selects only the useful joints for the UP2 dataset
+# Detects jumps caused by physios' hands
+# Smooths the signals
+# Computes the gradient of the smoothed signals
+# Visualizes the processed signals (optional)
+# Saves the processed signals (with _processed_kinematics.npy and _processed_in_dataset.npy suffixes)
+################################################################################
+
 get_joint_name = {
     0 : "nose",
     1 : "left eye (inner)",
