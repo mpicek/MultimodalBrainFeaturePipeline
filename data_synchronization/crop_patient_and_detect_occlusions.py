@@ -10,6 +10,7 @@
 # Saves the bounding box of the patient and the cropped image (for visualization)
 # Then detects occlusions (when the patient's bounding box is overlapping with another person's bounding box) 
 # CAREFUL: THE BOUNDING_BOXES MIGHT CONSIST JUST FROM THE NONE VALUE WHEN NO PERSON IS DETECTED
+# OCCLUSION FILE IS MADE ONLY WHEN EVERYTHING IS SUCCESSFUL. SO WHEN THE FILE IS MISSING, IT MEANS THAT THE FILE WAS SKIPPED.
 #
 ###############################################################################################
 
@@ -74,7 +75,7 @@ def process_video(video_path, model, analyze_every_n_frame=15):
     progress_bar.close()
     cap.release()
 
-    return bounding_boxes, patient_ids, video_height, video_width, example_frame, frame_nb
+    return bounding_boxes, patient_ids, video_height, video_width, example_frame, frame_nb + 1
 
 def get_nose_position_from_DLC(dlc_path):
 
