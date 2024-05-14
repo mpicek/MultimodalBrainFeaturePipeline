@@ -1,3 +1,5 @@
+import sys
+sys.path.append('../data_synchronization')
 import numpy as np
 import matplotlib.pyplot as plt
 import os
@@ -108,8 +110,10 @@ def get_useful_joints_UP2(joints):
         get_joint_index["right elbow"],
         get_joint_index["left wrist"],
         get_joint_index["right wrist"],
-        get_joint_index["left pinky"],
-        get_joint_index["right pinky"],
+        get_joint_index["left thumb"],
+        get_joint_index["right thumb"],
+        # get_joint_index["left shoulder"],
+        # get_joint_index["right shoulder"],
     ]
     return joints[:, useful_points, :]
 
@@ -190,15 +194,28 @@ def process_kinematics_file(joints, visualize=False):
         if jumps[i] == 1:
             joints[i] = np.nan # it broadcasts to all joints and both x and y coordinates
 
-    gradient = smooth(joints.copy(), SIGMA)
+    # 1. take joints and correct the z-coordinate by the average z-coordinate of shoulders (they shouldn't move so it's like a reference)
+    gradient = joints.copy()
+
+    # 2. smooth the signal
+    for joint in range(gradient.shape[1]):
+        gradient[:, joint, 0] = smooth(gradient[:, joint, 0], SIGMA)
+        gradient[:, joint, 1] = smooth(gradient[:, joint, 1], SIGMA)
+        gradient[:, joint, 2] = smooth(gradient[:, joint, 2], SIGMA)
+
+    # 3. compute the gradient for each joint separately
     final_gradient = np.zeros((joints.shape[0], joints.shape[1]))
     for joint in range(gradient.shape[1]):
         gradient[:, joint, 0] = smooth(np.gradient(gradient[:, joint, 0]), SIGMA)
         gradient[:, joint, 1] = smooth(np.gradient(gradient[:, joint, 1]), SIGMA)
+        # 4. decrease the movement of z coordinate by a factor (because it's very noisy)
+        gradient[:, joint, 2] = smooth(np.gradient(gradient[:, joint, 2] * Z_FACTOR), SIGMA)
 
-        # now compute the size of the gradient
-        final_gradient[:, joint] = np.linalg.norm(gradient[:, joint, :], axis=1)
-
+        # 5. compute the size (norm) of the gradient
+        if USE_Z_COORDINATE:
+            final_gradient[:, joint] = np.linalg.norm(gradient[:, joint, :3], axis=1)
+        else:
+            final_gradient[:, joint] = np.linalg.norm(gradient[:, joint, :2], axis=1)
 
     if visualize:
         jumps *= 100
@@ -234,7 +251,7 @@ def process_kinematics_file(joints, visualize=False):
     new_in_dataset_signal = []
     for datapoint in final_gradient[:, 0]: # Nans are in all joints, so let's use just one joint
         new_in_dataset_signal.append([datapoint, 0])
-
+    
     return final_gradient, new_in_dataset_signal
 
 def process_folder(input_folder, output_folder, visualize=False):
@@ -262,6 +279,8 @@ def process_folder(input_folder, output_folder, visualize=False):
 SIGMA = 1 # shortens the signal by 8 frames (by two applications of smoothing)
 ARM_LENGTH_IN_CM = 30
 JUMP_THRESHOLD_CM = 10 # without prior smoothing! So it's higher because there can be noise
+Z_FACTOR = 1/10 # decrease the movement of z coordinate by this factor
+USE_Z_COORDINATE = False
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Preprocess the kinematics signals.")
