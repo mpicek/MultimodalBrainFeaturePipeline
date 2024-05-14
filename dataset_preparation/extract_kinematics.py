@@ -62,6 +62,7 @@ def process_video_with_occlusions(video_path, detector, occlusions_path, annotat
 
     # while cap.isOpened():
     # use tqdm to show progress bar
+
     for _ in tqdm(range(n_frames)):
         if not cap.isOpened():
             break
@@ -84,7 +85,7 @@ def process_video_with_occlusions(video_path, detector, occlusions_path, annotat
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
             mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame)
-            detection_result = detector.detect(mp_img)
+            detection_result = detector.detect_for_video(mp_img, int((frame_nb / 30) * 1000)) # timestamp in ms
             result = detection_result.pose_landmarks
             if result == []:
                 in_dataset.append(0)
@@ -114,11 +115,15 @@ def process_video_with_occlusions(video_path, detector, occlusions_path, annotat
 
 def wrapper(mp4_basename, mp4_folder, occlusions_folder, output_folder, mediapipe_model_path):
     base_options = python.BaseOptions(model_asset_path=mediapipe_model_path)
+    VisionRunningMode = mp.tasks.vision.RunningMode
     options = vision.PoseLandmarkerOptions(
+        running_mode=VisionRunningMode.VIDEO,
         base_options=base_options,
         output_segmentation_masks=True,
-        num_poses=1,
-        min_pose_detection_confidence=0.8)
+        num_poses=5,
+        min_pose_detection_confidence=0.8,
+        min_tracking_confidence=0.7
+    )
     detector = vision.PoseLandmarker.create_from_options(options)
 
     print(f"Processing file {mp4_basename}")

@@ -14,6 +14,8 @@
 #
 ###############################################################################################
 
+import sys
+sys.path.append('../data_synchronization')
 from ultralytics import YOLO
 import pandas as pd
 import numpy as np
