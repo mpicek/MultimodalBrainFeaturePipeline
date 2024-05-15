@@ -69,7 +69,7 @@ def main(
         kinematics = np.load(os.path.join(kinematics_folder, mp4_name[:-len('.mp4')] + '_processed_kinematics.npy'))
         in_dataset = np.load(os.path.join(kinematics_folder, mp4_name[:-len('.mp4')] + '_processed_in_dataset.npy'))
 
-        original_wisci_path = row['path_wisci_acc']
+        original_wisci_path = row['path_wisci_led']
 
         basename_wisci = os.path.basename(original_wisci_path)
         last_folder_wisci = os.path.basename(os.path.dirname(original_wisci_path))
@@ -92,7 +92,7 @@ def main(
             continue
 
         wisci_len_585 = len(acc) # Including 6s at the beginning and at the end!!!
-        lag_585 = row['lag_acc']
+        lag_585 = row['lag_led']
         video_len_585 = row['frames_acc']
 
         # times expressed as ratios of the length of the wisci file
