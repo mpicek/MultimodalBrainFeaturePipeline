@@ -6,6 +6,7 @@ import pandas as pd
 import sys
 import cv2
 import pickle
+import shutil
 from tqdm import tqdm
 sys.path.append('../data_synchronization')
 from wisci_utils import get_accelerometer_data
@@ -21,6 +22,11 @@ def concatenate_mat_epochs(folder):
     concatenated = np.concatenate(opened_files, axis=0)
     return concatenated
 
+def copy_stats_mat_file(original_folder, destination_folder):
+    if not os.path.exists(os.path.join(destination_folder, 'stats.mat')):
+        shutil.copyfile(os.path.join(original_folder, 'stats.mat'), os.path.join(destination_folder, 'stats.mat'))
+
+
 def main(
         wisci_location,
         mp4_location, 
@@ -31,6 +37,9 @@ def main(
         led_sync_log_path, 
         acc_sync_log_path
     ):
+    ######################################################################################################
+    # First, filter out the invalid data files (bad sync, didn't pass the quality test, etc.)
+    ######################################################################################################
     led = pd.read_csv(led_sync_log_path)
     acc = pd.read_csv(acc_sync_log_path)
     acc = acc.drop_duplicates()
@@ -47,6 +56,9 @@ def main(
     # skip files that failed the synchronization
     df = df.query('sync_failed_led == 0 and sync_failed_acc == 0')
     
+    ######################################################################################################
+    # Now, loop over THE VIDEOS and create the dataset
+    ######################################################################################################
     for index, row in tqdm(df.iterrows(), total=df.shape[0]):
         # There are multiple indexes (time pointers):
         # - _sec: seconds
@@ -59,16 +71,13 @@ def main(
         mp4_name = row['mp4_name']
 
         # skip file if the mp4_name is already in log_file (and check if log_file exists)
-        if os.path.exists(log_file):
-            with open(log_file, 'r') as f:
-                if mp4_name in f.read():
-                    tqdm.write(f"File {mp4_name} already processed. Skipping.")
-                    continue
+        # if os.path.exists(log_file):
+        #     with open(log_file, 'r') as f:
+        #         if mp4_name in f.read():
+        #             tqdm.write(f"File {mp4_name} already processed. Skipping.")
+        #             continue
 
         tqdm.write(f"Processing: {mp4_name}")
-        kinematics = np.load(os.path.join(kinematics_folder, mp4_name[:-len('.mp4')] + '_processed_kinematics.npy'))
-        in_dataset = np.load(os.path.join(kinematics_folder, mp4_name[:-len('.mp4')] + '_processed_in_dataset.npy'))
-
         original_wisci_path = row['path_wisci_led']
 
         basename_wisci = os.path.basename(original_wisci_path)
@@ -76,12 +85,17 @@ def main(
         current_wisci_path = os.path.join(wisci_location, last_folder_wisci, basename_wisci)
         current_wave_wisci_path = os.path.join(wave_wisci_location, last_folder_wisci, basename_wisci[:-len('.mat')])
         current_output_folder = os.path.join(output_folder, last_folder_wisci, basename_wisci[:-len('.mat')])
+        try:
+            copy_stats_mat_file(current_wave_wisci_path, current_output_folder)
+        except Exception as e:
+            print("Error in file:", current_wave_wisci_path)
+            print(e)
+
+        kinematics = np.load(os.path.join(kinematics_folder, mp4_name[:-len('.mp4')] + '_processed_kinematics.npy'))
+        in_dataset = np.load(os.path.join(kinematics_folder, mp4_name[:-len('.mp4')] + '_processed_in_dataset.npy'))
 
         if not os.path.exists(current_output_folder):
             os.makedirs(current_output_folder)
-
-        # get the lengths of the video and the wisci file
-        video_len_sec = row['mp4_length_acc']
 
         try:
             acc, wisci_len_sec = get_accelerometer_data(current_wisci_path)
