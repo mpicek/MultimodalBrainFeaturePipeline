@@ -71,11 +71,11 @@ def main(
         mp4_name = row['mp4_name']
 
         # skip file if the mp4_name is already in log_file (and check if log_file exists)
-        # if os.path.exists(log_file):
-        #     with open(log_file, 'r') as f:
-        #         if mp4_name in f.read():
-        #             tqdm.write(f"File {mp4_name} already processed. Skipping.")
-        #             continue
+        if os.path.exists(log_file):
+            with open(log_file, 'r') as f:
+                if mp4_name in f.read():
+                    tqdm.write(f"File {mp4_name} already processed. Skipping.")
+                    continue
 
         tqdm.write(f"Processing: {mp4_name}")
         original_wisci_path = row['path_wisci_led']
@@ -85,24 +85,30 @@ def main(
         current_wisci_path = os.path.join(wisci_location, last_folder_wisci, basename_wisci)
         current_wave_wisci_path = os.path.join(wave_wisci_location, last_folder_wisci, basename_wisci[:-len('.mat')])
         current_output_folder = os.path.join(output_folder, last_folder_wisci, basename_wisci[:-len('.mat')])
+        
+        if not os.path.exists(current_output_folder):
+            os.makedirs(current_output_folder)
+
         try:
             copy_stats_mat_file(current_wave_wisci_path, current_output_folder)
         except Exception as e:
             print("Error in file:", current_wave_wisci_path)
             print(e)
+            continue
 
-        kinematics = np.load(os.path.join(kinematics_folder, mp4_name[:-len('.mp4')] + '_processed_kinematics.npy'))
-        in_dataset = np.load(os.path.join(kinematics_folder, mp4_name[:-len('.mp4')] + '_processed_in_dataset.npy'))
-
-        if not os.path.exists(current_output_folder):
-            os.makedirs(current_output_folder)
+        try:
+            kinematics = np.load(os.path.join(kinematics_folder, mp4_name[:-len('.mp4')] + '_processed_kinematics.npy'))
+            in_dataset = np.load(os.path.join(kinematics_folder, mp4_name[:-len('.mp4')] + '_processed_in_dataset.npy'))
+        except Exception as e:
+            print("Error in file:", os.path.join(kinematics_folder, mp4_name[:-len('.mp4')] + '_processed_kinematics.npy'))
+            print(e)
+            continue
 
         try:
             acc, wisci_len_sec = get_accelerometer_data(current_wisci_path)
         except Exception as e:
             print("Error in file:", current_wisci_path)
             print(e)
-            print(os.path.getsize(current_wisci_path) / 1000000)
             continue
 
         wisci_len_585 = len(acc) # Including 6s at the beginning and at the end!!!
@@ -150,7 +156,7 @@ def main(
 
         datapoint_index = 0
 
-        while video_index < video_len_30:
+        while video_index < video_len_30 - 32: # I don't care about those stupid +-1 ones, so to be sure I take 32 frames haha
             wave_index = int((video_start_r + video_index * video_inc_r)/ wave_inc_r)
             
             # The first 6 seconds and last 6 seconds were discarded. So we need to skip them.
