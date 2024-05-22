@@ -11,6 +11,7 @@
 
 
 #### 1. Download .bag files and the corresponding wisci (to bags/ and wisci/)
+ - wisci can be downloaded from the server using `copy_only_mat_files.py. And careful, comment out or adjust the condition on line 24!
 
 #### 2. bag2mp4.py
 
