@@ -20,9 +20,8 @@ def main(source_dir, dest_dir):
     :param dest_dir: Root directory where .mat files will be copied.
     """
     for dir in os.listdir(source_dir):
-        #if not "2023_12_" in dir and not "2023_09_2" in dir:
-        if not "2023_10_23" in dir and not "2023_10_24" in dir and not "2023_10_25" in dir:
-            continue
+        # if not "2024_01_" in dir and not "2024_02_" in dir:
+        #     continue
 
         relevant_dir = os.path.join(source_dir, dir)
 
