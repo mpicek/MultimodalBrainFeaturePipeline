@@ -250,7 +250,10 @@ def process_kinematics_file(joints, visualize=False):
 
     new_in_dataset_signal = []
     for datapoint in final_gradient[:, 0]: # Nans are in all joints, so let's use just one joint
-        new_in_dataset_signal.append([datapoint, 0])
+        if not np.isnan(datapoint):
+            new_in_dataset_signal.append(1)
+        else:
+            new_in_dataset_signal.append(0)
     
     return final_gradient, new_in_dataset_signal
 
