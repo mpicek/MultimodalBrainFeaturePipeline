@@ -135,12 +135,11 @@ def get_patients_bounding_box(bounding_boxes, patient_ids, video_height, video_w
 
     patient_bb = peoples_avg_bbs[patient_id].copy()
     patient_bb_small = peoples_avg_bbs[patient_id].copy()
-    coef_width = 0.3
-    coef_height = 0.2
-    patient_bb[0] = int(max(0, patient_bb[0] - coef_width * patient_width))
-    patient_bb[1] = int(max(0, patient_bb[1] - coef_height * patient_height))
-    patient_bb[2] = int(min(video_width, patient_bb[2] + coef_width * patient_width))
-    patient_bb[3] = int(min(video_height, patient_bb[3] + coef_height * patient_height))
+    
+    patient_bb[0] = int(max(0, patient_bb[0] - COEF_WIDTH * patient_width))
+    patient_bb[1] = int(max(0, patient_bb[1] - COEF_HEIGHT * patient_height))
+    patient_bb[2] = int(min(video_width, patient_bb[2] + COEF_WIDTH * patient_width))
+    patient_bb[3] = int(min(video_height, patient_bb[3] + COEF_HEIGHT * patient_height))
 
     return patient_bb, patient_bb_small, patient_id
 
@@ -198,27 +197,47 @@ def main(mp4_folder, dlc_folder, extraction_folder, DLC_suffix, analyzed_seconds
             for f in range(len(bounding_boxes)):
                 occlusion.append(0)
                 if bounding_boxes[f] is None:
-                    occlusion[f] = 2 # nobody is in the frame so we mark it as 2 as we don't want to analyze it
+                    occlusion[f] = 1  # nobody is in the frame so we mark it as occlusion (we don't want to analyze the frame later)
                     continue
+                occlusion_count = 0
                 for i in range(len(bounding_boxes[f])):
                     if patient_ids[f][i] != patient_id:
                         left1, top1, right1, bottom1 = patient_bb_small
                         left2, top2, right2, bottom2 = bounding_boxes[f][i]
 
                         if (left1 < right2) and (right1 > left2) and (top1 < bottom2) and (bottom1 > top2):
-                            occlusion[f] = 1
-                            break
+                            occlusion_count += 1
+                            overlap_width = min(right1, right2) - max(left1, left2)
+                            patient_width = right1 - left1
+
+                            if occlusion_count > 1:
+                                occlusion[f] = 1  # full occlusion due to multiple overlaps
+                                break
+
+                            if overlap_width > 0.25 * patient_width:
+                                occlusion[f] = 1  # full occlusion
+                                break
+                            else:
+                                if left1 < left2 and right1 > left2:
+                                    occlusion[f] = 2  # occlusion from the right - but from the camera view, so it is on the patient's left
+                                elif left1 < right2 and right1 > right2:
+                                    occlusion[f] = 3  # occlusion from the left - but from the camera view, so it is on the patient's right
+
+
             # expand the occlusions to be for every frame and not for just every analyzed frame
             occlusion = np.repeat(occlusion, analyze_every_n_frame)
             occlusion = occlusion[:num_frames]
 
             np.save(os.path.join(extraction_folder, mp4_basename + '_occlusion.npy'), occlusion)
+
         except NoPatientDetectedError as e:
             print(str(e))
             np.save(os.path.join(extraction_folder, mp4_basename + '_bounding_box.npy'), np.array(None))
             with open(os.path.join(extraction_folder, 'skipped_files.csv'), 'a') as f:
                 f.write(f"{mp4_name}\n")
 
+COEF_WIDTH = 0.3
+COEF_HEIGHT = 0.2
 
 if __name__ == "__main__":
     # Argument parser setup
