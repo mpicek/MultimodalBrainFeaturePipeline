@@ -6,11 +6,11 @@ import time
 load_dir = '/home/mpicek/repos/master_project/test_data/corresponding/'
 filename = 'cam0_911222060374_record_13_11_2023_1337_20.bag'
 # filename = 'cam0_911222060374_record_13_11_2023_1330_19.bag'
-save_dir = load_dir
+save_dir = '/media/mpicek/T7/martin/bags/lol/'
 
 pipeline = rs.pipeline()
 config = rs.config()
-rs.config.enable_device_from_file(config, load_dir + filename)
+rs.config.enable_device_from_file(config, '/media/mpicek/T7/martin/bags/cam0_911222060374_record_06_09_2023_1440_06.bag')
 config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
 config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
 
