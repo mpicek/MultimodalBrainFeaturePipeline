@@ -71,8 +71,8 @@ def process_video_with_occlusions(video_path, detector, occlusions_path, annotat
 
         if success == True:
 
-            # If there is an occlusion (occlusion == 1) or the patient was not detected at all (occlusion == 2)
-            if occlusions[frame_nb] != 0:
+            # If there is a full occlusion (occlusion == 1)
+            if occlusions[frame_nb] == 1:
                 frame_nb += 1
                 joints.append([[np.nan, np.nan, np.nan, np.nan] for _ in range(33)])
                 in_dataset.append(0)
@@ -87,17 +87,32 @@ def process_video_with_occlusions(video_path, detector, occlusions_path, annotat
             mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame)
             detection_result = detector.detect_for_video(mp_img, int((frame_nb / 30) * 1000)) # timestamp in ms
             result = detection_result.pose_landmarks
-            if result == []:
+
+            occluded_joints = []
+            if result == []: # mediapipe didn't detect the patient
                 in_dataset.append(0)
                 joints.append([[np.nan, np.nan, np.nan, np.nan] for _ in range(33)])
             else:
-                in_dataset.append(1)
-                joints.append([[landmark.x * width, landmark.y * height, landmark.z * width, landmark.visibility] for landmark in result[0]])
-            annotated_image = draw_landmarks_on_image(mp_img.numpy_view(), detection_result)
+                if occlusions[frame_nb] == 2:
+                    occluded_joints = [[np.nan, np.nan, np.nan, np.nan] if landmark.x * width > width / 2 else [landmark.x * width, landmark.y * height, landmark.z * width, landmark.visibility] for landmark in result[0]]
+                elif occlusions[frame_nb] == 3:
+                    occluded_joints = [[np.nan, np.nan, np.nan, np.nan] if landmark.x * width < width / 2 else [landmark.x * width, landmark.y * height, landmark.z * width, landmark.visibility] for landmark in result[0]]
+                else:
+                    occluded_joints = [[landmark.x * width, landmark.y * height, landmark.z * width, landmark.visibility] for landmark in result[0]]
 
-            frame = av.VideoFrame.from_ndarray(annotated_image)
+                joints.append(occluded_joints)
+                in_dataset.append(1)
 
             if annotated_video_name is not None:
+                annotated_image = draw_landmarks_on_image(mp_img.numpy_view(), detection_result)
+                # Overlay selected points with red dots
+                for joint in occluded_joints:
+                    if not np.isnan(joint[0]):
+                        cv2.circle(annotated_image, (int(joint[0]), int(joint[1])), 3, (255, 0, 0), -1)  # red dot
+
+
+                frame = av.VideoFrame.from_ndarray(annotated_image)
+
                 for packet in stream.encode(frame):
                     container.mux(packet)
 
@@ -165,7 +180,7 @@ if __name__ == "__main__":
     parser.add_argument("cropped_mp4_videos_folder", help="Path to the folder containing the cropped mp4 files.")
     parser.add_argument("occlusions_folder", help="Path to the folder containing occlusions files.")
     parser.add_argument("output_folder", help="Where to put output.")
-    parser.add_argument("--mediapipe_model_path", default='/home/vita-w11/mpicek/master_project/mediapipe_models/pose_landmarker_heavy.task', help="Path to the mediapipe model.")    
+    parser.add_argument("--mediapipe_model_path", default='../pretrained_models/pose_landmarker_heavy.task', help="Path to the mediapipe model.")    
 
     args = parser.parse_args()
 
