@@ -8,7 +8,7 @@
 # Finds patient in the video based on the detection with YOLO and the nose position from DLC
 # Skips the processing of files that have already been processed (based on the existence of the _bounding_box.npy file or presence in skipped_files.csv)
 # Saves the bounding box of the patient and the cropped image (for visualization)
-# Then detects occlusions (when the patient's bounding box is overlapping with another person's bounding box) 
+# Then detects occlusions (when the patient's bounding box is overlapping with another person's bounding box) - but if the occlusion is partial, it still saves joints on the opposite side of the occlusion
 # CAREFUL: THE BOUNDING_BOXES MIGHT CONSIST JUST FROM THE NONE VALUE WHEN NO PERSON IS DETECTED
 # OCCLUSION FILE IS MADE ONLY WHEN EVERYTHING IS SUCCESSFUL. SO WHEN THE FILE IS MISSING, IT MEANS THAT THE FILE WAS SKIPPED.
 #
@@ -145,8 +145,8 @@ def get_patients_bounding_box(bounding_boxes, patient_ids, video_height, video_w
 
 
 
-def main(mp4_folder, dlc_folder, extraction_folder, DLC_suffix, analyzed_seconds, fps):
-    model = YOLO('yolov8n.pt')
+def main(mp4_folder, dlc_folder, extraction_folder, DLC_suffix, analyzed_seconds, fps, yolo_model_path):
+    model = YOLO(yolo_model_path)
     analyze_every_n_frame = 15
     
     for mp4_name in os.listdir(mp4_folder):
@@ -253,4 +253,4 @@ if __name__ == "__main__":
     analyzed_seconds = 13
     fps = 30
     DLC_suffix = 'DLC_resnet50_UP2_movement_syncApr15shuffle1_525000.csv'
-    main(args.mp4_folder, args.dlc_folder, args.extraction_folder, DLC_suffix, analyzed_seconds, fps)
+    main(args.mp4_folder, args.dlc_folder, args.extraction_folder, DLC_suffix, analyzed_seconds, fps, yolo_model_path='../pretrained_models/yolov8n.pt')

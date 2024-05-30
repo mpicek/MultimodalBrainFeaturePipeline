@@ -1,12 +1,25 @@
 test_data/
 tmp/
+pretrained_models/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
 *.npy
+
+# for the sake of safety - we really don't want our patient's data to be leaked
 *.mp4
+/*/*.mp4
+/*/*/*.mp4
+/*/*/*/*.mp4
+/*/*/*/*/*.mp4
+/*/*/*/*/*/*.mp4
+/*/*/*/*/*/*/*.mp4
+/*/*/*/*/*/*/*/*.mp4
+/*/*/*/*/*/*/*/*/*.mp4
+/*/*/*/*/*/*/*/*/*/*.mp4
+
 *.task
 # C extensions
 *.so
