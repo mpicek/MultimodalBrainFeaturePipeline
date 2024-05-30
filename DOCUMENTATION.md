@@ -47,9 +47,17 @@ It will create the column if doesn't exist yet.
 
 #### Detection of occlusions & finding the patient's bounding box
  - crop_patient_and_detect_occlusions.py
- - returns `_bounding_box.npy`, `_occlusion.npy`, `_cropped.png` (for manual validation), and `skipped_files.csv` (just a log to not process the skipped files more times)
+ - Finds patient in the video based on the detection with YOLO and the nose position from DLC
+ - returns `_bounding_box.npy`, `_occlusion.npy`, `_cropped.png` (for manual validation), and `skipped_files.csv` (logs only files that were skipped). We skip the files for the following reasons:
+      - the nose position likelihood is too low (so the patient is not there or he/she is backwards or DLC just didn't detect it) - when likelihood is < 0.4
+      - no person is at the location of the detected patient's nose
+      - no people detected in the whole video
 
-#### Crop patient from videos 
+    - bounding box is in format (x1, y1, x2, y2), it's in pixels and x increases from left to right on the image, y increases from top to bottom ([0, 0] is top left in the image)
+    - occlusion can be: 0 (no occlusion), 1 (full occlusion or multiple small occlusions), 2 (occlusion from the right on image (left side of patient)), 3 (occlusion from the left)
+
+
+#### Crop patient from the videos 
  - crop_videos.py
  - for computing higher semantic features with DinoV2/
  - outputs `_cropped.mp4`
@@ -58,11 +66,15 @@ It will create the column if doesn't exist yet.
  - extract_kinematics.py
  - returns `_kinematics.npy`, `_annotated.mp4` (for manual validation) and `_in_dataset.npy`
  - `_in_dataset.npy` has for each frame value:
-    - 0 if there is occlusion with the patient OR mediapipe didn't detect the patient
-    - 1 if there is no occlusion AND mediapipe successfully detected the patient
+    - 0 if there is occlusion of the whole body with the patient OR mediapipe didn't detect the patient
+    - 1 if there is no occlusion or just partial one AND mediapipe successfully detected the patient
+ - Sets Nan values to occluded joints, otherwise it sets the coordinate **in pixel space**
 
 #### Preprocess kinematics
- - preprocess_kinematics.py
- - returns `_processed_kinematics.npy` and `_processed_in_dataset.npy`
- - selects the important joints, detects jumps (caused by physios' hands and low-quality mediapipe detection), smooths the signals
- - then computes gradient of each joint
+ - preprocess_2d_kinematics.py
+ - returns `_processed_2d_kinematics.npy` and `_processed_2d_in_dataset.npy`
+ - filters out the unimportant joints
+ - detects jumps for each joint separately (caused by physios' hands and low-quality mediapipe detection) - using normalization to shoulder length and filters out these jumps (sets the coordinates to Nan)
+ - Filter out movements when the joints have visibility lower than 0.75 (from mediapipe)
+ - Smooths the signals (only 2D positions)
+ - DOES NOT COMPUTE GRADIENT OF JOINTS' MOVEMENTS(the older code for that is commented)
