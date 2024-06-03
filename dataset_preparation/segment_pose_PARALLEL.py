@@ -7,7 +7,7 @@ import av
 import os
 import argparse
 from tqdm import tqdm
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor
 
 def process_video_segment(video_path, detector, occlusions_path, output_video_name, delete_occlusions):
     occlusions = np.load(occlusions_path)
@@ -25,8 +25,9 @@ def process_video_segment(video_path, detector, occlusions_path, output_video_na
     stream.height = height
     stream.pix_fmt = 'yuv420p'
     stream.framerate = 30
-
     green_background = np.full((height, width, 3), (0, 255, 0), dtype=np.uint8)
+
+    in_dataset = []
 
     for _ in tqdm(range(n_frames)):
         if not cap.isOpened():
@@ -38,22 +39,22 @@ def process_video_segment(video_path, detector, occlusions_path, output_video_na
 
         if occlusions[frame_nb] == 1 and delete_occlusions:
             frame_saved = av.VideoFrame.from_ndarray(green_background)
+            in_dataset.append(0)
+
         else:
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame)
             detection_result = detector.detect_for_video(mp_img, int((frame_nb / 30) * 1000))
 
-            if occlusions[frame_nb] == 1:
-                frame_saved = av.VideoFrame.from_ndarray(green_background)
+            if detection_result.segmentation_masks:
+                segmentation_mask = detection_result.segmentation_masks[0].numpy_view()
+                mask_3d = np.repeat(segmentation_mask[:, :, np.newaxis], 3, axis=2)
+                masked_frame = np.where(mask_3d > MASK_THRESHOLD, frame, green_background)
+                frame_saved = av.VideoFrame.from_ndarray(masked_frame)
+                in_dataset.append(1)
             else:
-                if detection_result.segmentation_masks:
-                    segmentation_mask = detection_result.segmentation_masks[0].numpy_view()
-                    mask_3d = np.repeat(segmentation_mask[:, :, np.newaxis], 3, axis=2)
-                    # mask_3d = mask_3d.astype(np.uint8)
-                    masked_frame = np.where(mask_3d > MASK_THRESHOLD, frame, green_background)
-                    frame_saved = av.VideoFrame.from_ndarray(masked_frame)
-                else:
-                    frame_saved = av.VideoFrame.from_ndarray(green_background)
+                frame_saved = av.VideoFrame.from_ndarray(green_background)
+                in_dataset.append(0)
 
         for packet in stream.encode(frame_saved):
             container.mux(packet)
@@ -64,6 +65,7 @@ def process_video_segment(video_path, detector, occlusions_path, output_video_na
         container.mux(packet)
     container.close()
     cap.release()
+    np.save(output_video_name.replace('.mp4', '_in_dataset.npy'), np.array(in_dataset))
 
 def wrapper(mp4_basename, mp4_folder, occlusions_folder, output_folder, mediapipe_model_path, delete_occlusions):
     base_options = python.BaseOptions(model_asset_path=mediapipe_model_path)
@@ -104,7 +106,7 @@ def wrapper(mp4_basename, mp4_folder, occlusions_folder, output_folder, mediapip
 def main(mp4_folder, occlusions_folder, output_folder, mediapipe_model_path, delete_occlusions, num_workers):
     mp4_basenames = [file for file in os.listdir(mp4_folder) if file.endswith('.mp4')]
 
-    with ThreadPoolExecutor(max_workers=num_workers) as executor:
+    with ProcessPoolExecutor(max_workers=num_workers) as executor:
         futures = [executor.submit(wrapper, mp4_basename, mp4_folder, occlusions_folder, output_folder, mediapipe_model_path, delete_occlusions) for mp4_basename in mp4_basenames]
         
         for future in tqdm(futures):
