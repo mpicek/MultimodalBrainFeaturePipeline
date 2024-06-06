@@ -1,0 +1,3 @@
+[submodule "/home/cyberspace007/mpicek/master_project/experiments/RCDM"]
+	path = /home/cyberspace007/mpicek/master_project/experiments/RCDM
+	url = git@github.com:mpicek/RCDM.git
