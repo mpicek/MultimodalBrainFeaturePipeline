@@ -83,10 +83,10 @@ It will create the column if doesn't exist yet.
  - preprocess_2d_kinematics.py
  - returns `_processed_2d_kinematics.npy` and `_processed_2d_in_dataset.npy`
  - the input is the kinematics from the previous step
- - filters out the unimportant joints
+ - filters out the unimportant joints, returns only 9 of them 
  - detects jumps for each joint separately (caused by physios' hands and low-quality mediapipe detection) - using normalization to shoulder length and filters out these jumps (sets the coordinates to Nan)
  - Filters out movements when the joints have visibility lower than 0.75 (from mediapipe)
- - Smooths the signals (only 2D positions)
+ - Smooths the signals (only 2D positions) but does not shorten it
  - DOES NOT COMPUTE GRADIENT OF JOINTS' MOVEMENTS (the older code for that is commented)
 
  #### Segment the patient
