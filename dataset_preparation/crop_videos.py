@@ -63,7 +63,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Extract the LED signals from .mp4 files.")
     parser.add_argument("mp4_folder", help="Path to the folder containing mp4 files.")
     parser.add_argument("extraction_folder", help="Path to the folder containing bounding boxes (.npy files).")
-    parser.add_argument("output_folder", help="Path to the output folder LED signals.")
+    parser.add_argument("output_folder", help="Where to save the cropped videos.")
     args = parser.parse_args()
 
     crop_videos(args.mp4_folder, args.extraction_folder, args.output_folder)
