@@ -164,7 +164,7 @@ def main(mp4_folder, occlusions_folder, output_folder, mediapipe_model_path):
     
     mp4_basenames = [file for file in os.listdir(mp4_folder) if file.endswith('.mp4')]
 
-    for mp4_basename in mp4_basenames:
+    for mp4_basename in tqdm(mp4_basenames):
         wrapper(mp4_basename, mp4_folder, occlusions_folder, output_folder, mediapipe_model_path)
 
     # pool = multiprocessing.Pool()

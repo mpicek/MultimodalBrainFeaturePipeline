@@ -29,7 +29,7 @@ def process_video_segment(video_path, detector, occlusions_path, output_video_na
 
     in_dataset = []
 
-    for _ in tqdm(range(n_frames)):
+    for _ in range(n_frames):
         if not cap.isOpened():
             break
 
@@ -75,7 +75,7 @@ def wrapper(mp4_basename, mp4_folder, occlusions_folder, output_folder, mediapip
         base_options=base_options,
         output_segmentation_masks=True,
         num_poses=1,
-        min_pose_detection_confidence=0.5,
+        min_pose_detection_confidence=0.7,
         min_tracking_confidence=0.7
     )
     detector = vision.PoseLandmarker.create_from_options(options)
