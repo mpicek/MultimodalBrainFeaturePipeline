@@ -40,15 +40,25 @@ def crop_videos(mp4_folder, extraction_folder, output_folder):
                 # Crop video using ffmpeg
                 input_path = os.path.join(mp4_folder, video_file)
                 output_path = os.path.join(output_folder, f"{mp4_filename}_cropped.mp4")
+                # We'll save the output to a temporary file first
+                # so that when the process is interrupted, we know that it was not processed correctly
+                # and we can remove it and start again
+                output_path_tmp = os.path.join(output_folder, f"{mp4_filename}_cropped_tmp.mp4")
                 
                 # proceed if the file does not exist
                 if os.path.exists(output_path):
                     tqdm.write(f"\tVideo already cropped. Skipping.")
                     continue
+                if os.path.exists(output_path_tmp):
+                    # remove the temporary file, it was not processed correctly
+                    os.remove(output_path_tmp)
+                
                 command = (f"ffmpeg -i {input_path} -loglevel warning -vf "
                            f"crop={width}:{height}:{bounding_box[0]}:{bounding_box[1]} "
-                           f"{output_path}")
+                           f"{output_path_tmp}")
                 subprocess.run(command, shell=True)
+                # rename the temporary file to the final name
+                os.rename(output_path_tmp, output_path)
                 tqdm.write(f"\tVideo cropped and saved as {output_path}")
             else:
                 tqdm.write(f"\tNo bounding box data found, skipping.")
