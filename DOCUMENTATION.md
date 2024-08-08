@@ -9,9 +9,8 @@
 
 # Pipeline
 
-
 #### 1. Download .bag files and the corresponding wisci (to bags/ and wisci/)
- - wisci can be downloaded from the server using `copy_only_mat_files.py. And careful, comment out or adjust the condition on line 24!
+ - WISCI files have to be downloaded from the server. For that, you can use copy_only_mat_files.py. And be careful, comment out or adjust the condition on line 24!
 
 #### 2. bag2mp4.py
 
@@ -80,7 +79,7 @@ It will create the column if doesn't exist yet.
  - in the script, set parameters of mediapipe. The defaults we use are: num_poses (5), min_pose_detection_confidence (0.8), min_tracking_confidence (0.7)
 
 #### Preprocess kinematics
- - preprocess_2d_kinematics.py
+ - preprocess_2D_kinematics.py
  - returns `_processed_2d_kinematics.npy` and `_processed_2d_in_dataset.npy`
  - the input is the kinematics from the previous step
  - filters out the unimportant joints, returns only 9 of them 
@@ -100,3 +99,12 @@ It will create the column if doesn't exist yet.
  - extract_dino_features.py
  - returns `_features.npy`
  - extracts features from the cropped videos with segmented patient (with green background) using DINO
+
+#### Extract the K-DINO features
+  - extract_K-DINO_features.py
+  - needs a pretrained network trained in experiments/predict_kinematics_from_dino.ipynb (described bellow)
+  - returns `_K-DINO_features.npy`
+
+## Testing the Decoder on features from different models
+
+Code is available in `decoder_testing/` folder. **Everything is described there in Readme.md.**
