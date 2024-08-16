@@ -105,6 +105,12 @@ It will create the column if doesn't exist yet.
   - needs a pretrained network trained in experiments/predict_kinematics_from_dino.ipynb (described bellow)
   - returns `_K-DINO_features.npy`
 
+## Dataset Generation
+ - connect_modalities_into_dataset.py
+ - IMPORTANT NOTICE: A hardcoded array of the days for testing (test_dates). Change it accordingly. Firstly run the script for the training dataset generation, then inverse the condition in the code to generate the test dataset.
+ - For videos that passed synchronization (change the code according to what synchronization you are interested in), it connects all modalities into a dataset. For each video, there is a sliding window of 1s length that jumps by 15 frames (~500ms). It connects the wavelet transformed brain features, DINO features, kinematics and accelerometer within this one second into one `.pkl` file. At also puts there metadata such as what index was used in each of the modality etc.
+ - It uses relative indexing, so all the indices are normalized accoring to th wisci signal length.
+
 ## Testing the Decoder on features from different models
 
 Code is available in `decoder_testing/` folder. **Everything is described there in Readme.md.**
