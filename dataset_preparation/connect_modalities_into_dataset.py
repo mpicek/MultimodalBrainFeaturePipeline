@@ -45,8 +45,9 @@ def main(
     """
     Connects all modalities into one dataset:
       - wavelet transform of WIMAGINE data (10Hz)
-      - DINO features (30Hz)
-      - accelerometer data (30Hz) - the raw 585Hz data is smoothed and resampled to 30Hz
+      - DINO features (30Hz) .. (2048, 30)
+      - accelerometer data (30Hz) - the raw 585Hz data is smoothed and resampled to 30Hz .. (30, 3)
+      - kinematics data (30Hz) .. (30, 9, 4)
     """
     
     ######################################################################################################
@@ -82,6 +83,24 @@ def main(
 
         mp4_name = row['mp4_name']
 
+        ## CODE FOR SPLITTING BETWEEN TEST AND TRAIN
+        ## YOU HAVE TO RUN THE SCRIPT FIRST FOR THE TRAIN SET AND THEN FOR THE TEST SET,
+        ## BUT CHANGE THE CONDITION BELOW TO IT'S INVERSE TO GENERATE THE TEST SET ONLY
+        ## INSTEAD OF THE TRAINING SET
+        test_dates = [
+            "27_10_2023",
+            "23_10_2023",
+            "06_10_2023",
+            "17_11_2023",
+            "10_11_2023",
+            "01_11_2023",
+        ]
+
+        # for generating the test dataset, inverse the condition
+        if any([date in mp4_name for date in test_dates]):
+            tqdm.write(f"File {mp4_name} will be in test. Skipping.")
+            continue 
+
         # skip file if the mp4_name is already in log_file (and check if log_file exists)
         if os.path.exists(log_file):
             with open(log_file, 'r') as f:
@@ -113,7 +132,6 @@ def main(
             print("Error in file:", current_wave_wisci_path)
             print(e)
             continue
-
 
         try:
             dino_features = np.load(os.path.join(dino_folder, mp4_name[:-len('.mp4')] + '_features.npy'))
@@ -202,7 +220,7 @@ def main(
             acc_index = int((video_start_r + video_index * video_inc_r)/ wisci_inc_r)
 
             
-            # The first 6 seconds and last 6 seconds were discarded. So we need to skip them.
+            # The first 6 seconds and last 6 seconds of brain data were discarded. So we need to skip them.
             # I'm not sure how the last 6 seconds are handled in the original code from Clinatec, 
             # that's why I discard the whole 7 seconds
             if wave_index < 60:
@@ -221,7 +239,7 @@ def main(
             wave_data = wave[wave_index:wave_index+10]
             current_dino_features = dino_features[video_index:video_index+30]
             current_accelerometer = acc[acc_index:acc_index + 585]
-            # also smooth the raw accelerometer data
+            # also resample the previously smoothed accelerometer data
             current_accelerometer = scipy.signal.resample(current_accelerometer, 30, axis=0)
             current_kinematics = kinematics[video_index:video_index+30] if include_kinematics else None
 
@@ -244,26 +262,41 @@ def main(
                 pickle.dump(datapoint, f)
             
             datapoint_index += 1
-            video_index += 15
+            video_index += 15 ################################ CHANGE THIS TO ADJUST THE SLIDING WINDOW SPEED: 15 FOR 0.5S, 30 FOR 1S, 3 FOR 0.1S
 
         with open(log_file, 'a') as f:
             f.write(row['mp4_name'] + '\n')
 
 
 PEAKS_THRESHOLD = 5
+# wisci_location = '/media/cyberspace007/T7/martin/WISCI/'
+# mp4_location = '/media/cyberspace007/T7/martin/data/mp4/'
+# wave_wisci_location = '/media/cyberspace007/T7/icare/PROCESSED_DATA_UP2001/all/'
+# dino_folder = '/media/cyberspace007/T7/martin/data/dino_features_0_7'
+# in_dataset_dino_folder = '/media/cyberspace007/T7/martin/data/pose_segmentation_0_7_filtered'
+# # output_folder = '/media/cyberspace007/T7/martin/data/dataset_0_7/'
+# output_folder = '/media/cyberspace007/T7/martin/data/dataset_with_kinematics_0_7/'
+# # log_file = '/media/cyberspace007/T7/martin/data/files_used_for_dataset_0_7.txt'
+# log_file = '/media/cyberspace007/T7/martin/data/files_used_for_dataset_with_kinematics_0_7.txt'
+# led_sync_log_path = '/media/cyberspace007/T7/martin/data/log_sync_led.csv'
+# acc_sync_log_path = '/media/cyberspace007/T7/martin/data/log_sync_acc.csv'
+# kinematics_folder = '/media/cyberspace007/T7/martin/data/kinematics'
+# in_dataset_kinematics_folder = kinematics_folder
+
 wisci_location = '/media/cyberspace007/T7/martin/WISCI/'
-mp4_location = '/media/cyberspace007/T7/martin/data/mp4/'
+mp4_location = '/media/cyberspace007/T7/martin/last_drive/mp4/'
 wave_wisci_location = '/media/cyberspace007/T7/icare/PROCESSED_DATA_UP2001/all/'
-dino_folder = '/media/cyberspace007/T7/martin/data/dino_features_0_7'
-in_dataset_dino_folder = '/media/cyberspace007/T7/martin/data/pose_segmentation_0_7_filtered'
+dino_folder = '/media/cyberspace007/T7/martin/last_drive/dino_features'
+in_dataset_dino_folder = '/media/cyberspace007/T7/martin/last_drive/pose_segmentation_0_7_filtered'
 # output_folder = '/media/cyberspace007/T7/martin/data/dataset_0_7/'
-output_folder = '/media/cyberspace007/T7/martin/data/dataset_with_kinematics_0_7/'
+output_folder = '/media/cyberspace007/T7/martin/last_drive/test_dataset_half_second_step/'
 # log_file = '/media/cyberspace007/T7/martin/data/files_used_for_dataset_0_7.txt'
-log_file = '/media/cyberspace007/T7/martin/data/files_used_for_dataset_with_kinematics_0_7.txt'
-led_sync_log_path = '/media/cyberspace007/T7/martin/data/log_sync_led.csv'
-acc_sync_log_path = '/media/cyberspace007/T7/martin/data/log_sync_acc.csv'
-kinematics_folder = '/media/cyberspace007/T7/martin/data/kinematics'
+log_file = '/media/cyberspace007/T7/martin/last_drive/files_used_for_dataset_with_kinematics_0_7_tmp.txt'
+led_sync_log_path = '/media/cyberspace007/T7/martin/last_drive/acc_synchronization.csv'
+acc_sync_log_path = '/media/cyberspace007/T7/martin/last_drive/led_synchronization.csv'
+kinematics_folder = '/media/cyberspace007/T7/martin/last_drive/kinematics'
 in_dataset_kinematics_folder = kinematics_folder
+
 
 if __name__ == '__main__':
     # pass everything to main
