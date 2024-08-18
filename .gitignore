@@ -1,3 +1,8 @@
+ModelRecomputation/
+experiments/samples/
+experiments/results/
+experiments/MLP_DINO_to_kinematics.pth
+decoder_testing/figures/
 test_data/
 tmp/
 pretrained_models/
