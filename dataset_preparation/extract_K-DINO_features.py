@@ -78,7 +78,7 @@ def main(dino_folder, output_folder, MLP_checkpoint):
 
             print(f'Saved new features to {output_path}')
 
-# MLP_checkpoint = '/home/cyberspace007/mpicek/master_project/experiments/MLP_DINO_to_kinematics.pth'
+# MLP_checkpoint = '/home/cyberspace007/mpicek/MultimodalBrainFeaturePipeline/experiments/MLP_DINO_to_kinematics.pth'
 # dino_folder = '/media/cyberspace007/T7/tmp/dino'  # Set this to your DINO features folder
 # output_folder = '/media/cyberspace007/T7/tmp/between_dino_and_kinematics'  # Set this to your desired output folder
 

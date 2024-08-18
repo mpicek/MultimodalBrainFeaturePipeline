@@ -91,7 +91,7 @@ class ImageCropper:
 
 if __name__ == "__main__":
     # Example usage
-    image_path = '/home/mpicek/repos/master_project/test_data/camera/C0359T01.JPG'
+    image_path = '/home/mpicek/repos/MultimodalBrainFeaturePipeline/test_data/camera/C0359T01.JPG'
     image_array = cv2.imread(image_path)  # Ensure you read the image with OpenCV
     cropper = ImageCropper(image_array)
     roi, ref_point = cropper.show_and_crop_image()

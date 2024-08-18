@@ -1,6 +1,6 @@
 clear
-addpath("/home/cyberspace007/mpicek/master_project/decoder_testing/ModelRecomputation")
-load /home/cyberspace007/mpicek/master_project/decoder_testing/NRColors.mat
+addpath("/home/cyberspace007/mpicek/MultimodalBrainFeaturePipeline/decoder_testing/ModelRecomputation")
+load /home/cyberspace007/mpicek/MultimodalBrainFeaturePipeline/decoder_testing/NRColors.mat
 NRColors.VoltageYellow = [235, 227, 4] / 255;
 NRColors.DeepViolet = [108, 62, 144] / 255;
 NRColors.Magenta = [211, 53, 190] / 255;
@@ -354,7 +354,7 @@ ylim([0 1]);
 % name_png = "F1_SCORES_DINO_SSL_full_retrain_29.png";
 % name_svg = "F1_SCORES_DINO_SSL_full_retrain_29.svg";
 % 
-% directory = '/home/cyberspace007/mpicek/master_project/decoder_testing/figures/';
+% directory = '/home/cyberspace007/mpicek/MultimodalBrainFeaturePipeline/decoder_testing/figures/';
 % 
 % full_path_png = fullfile(directory, name_png);
 % full_path_svg = fullfile(directory, name_svg);
@@ -398,7 +398,7 @@ ylim([0 1]);
 % name_png = "COMPARISON.png";
 % name_svg = "COMPARISON.svg";
 % 
-% directory = '/home/cyberspace007/mpicek/master_project/decoder_testing/figures/';
+% directory = '/home/cyberspace007/mpicek/MultimodalBrainFeaturePipeline/decoder_testing/figures/';
 % 
 % full_path_png = fullfile(directory, name_png);
 % full_path_svg = fullfile(directory, name_svg);
@@ -515,7 +515,7 @@ linkaxes([ax1 ax2 ax3], 'x')
 name_png = "PROBABILITIES_DINO_SSL_full_retrain_29_100_percent_data.png";
 name_svg = "PROBABILITIES_DINO_SSL_full_retrain_29_100_percent_data.svg";
 
-directory = '/home/cyberspace007/mpicek/master_project/decoder_testing/figures/';
+directory = '/home/cyberspace007/mpicek/MultimodalBrainFeaturePipeline/decoder_testing/figures/';
 
 % Create the full path by concatenating the directory and the filename
 full_path_png = fullfile(directory, name_png);
@@ -627,7 +627,7 @@ set(gca, 'XTick', 1:n_states, 'YTick', 1:n_states);
 % name_png = "CONF_MATRIX_DINO_SSL_full_retrain_29_30_percent_data.png";
 % name_svg = "CONF_MATRIX_DINO_SSL_full_retrain_29_30_percent_data.svg";
 % 
-% directory = '/home/cyberspace007/mpicek/master_project/decoder_testing/figures/';
+% directory = '/home/cyberspace007/mpicek/MultimodalBrainFeaturePipeline/decoder_testing/figures/';
 % 
 % full_path_png = fullfile(directory, name_png);
 % full_path_svg = fullfile(directory, name_svg);

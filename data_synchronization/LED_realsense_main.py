@@ -144,9 +144,9 @@ def get_LED_signal_realsense(path_bag, downscale_factor):
 
 if __name__ == "__main__":
 
-    path_bag = "/home/mpicek/repos/master_project/test_data/corresponding/cam0_911222060374_record_13_11_2023_1337_20.bag"
+    path_bag = "/home/mpicek/repos/MultimodalBrainFeaturePipeline/test_data/corresponding/cam0_911222060374_record_13_11_2023_1337_20.bag"
     output_file = "LED_20.npy"
-    # path_bag = "/home/mpicek/repos/master_project/test_data/corresponding/cam0_911222060374_record_13_11_2023_1330_19.bag"
+    # path_bag = "/home/mpicek/repos/MultimodalBrainFeaturePipeline/test_data/corresponding/cam0_911222060374_record_13_11_2023_1330_19.bag"
 
     downscale_factor = 1 # realsense is 640x480, so we don't need to downscale it
     video_array, cropped_LED_image_colorful = get_LED_signal_realsense(path_bag, downscale_factor)

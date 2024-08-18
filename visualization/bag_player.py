@@ -3,7 +3,7 @@ import numpy as np
 import cv2
 import time
 
-load_dir = '/home/mpicek/repos/master_project/test_data/corresponding/'
+load_dir = '/home/mpicek/repos/MultimodalBrainFeaturePipeline/test_data/corresponding/'
 filename = 'cam0_911222060374_record_13_11_2023_1337_20.bag'
 # filename = 'cam0_911222060374_record_13_11_2023_1330_19.bag'
 save_dir = '/media/mpicek/T7/martin/bags/lol/'
