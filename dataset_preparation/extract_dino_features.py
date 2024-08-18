@@ -1,7 +1,6 @@
 import sys
 sys.path.append('../experiments')
 import argparse
-import json
 import numpy as np
 import torch as th
 from torchvision import transforms
@@ -70,8 +69,6 @@ class VideoDataset(Dataset):
 
 def main(args):
 	args.gpu = 0
-	with open('args.json', 'w') as f:
-		json.dump(vars(args), f)
 	
 	# if output path doesn't exist, create it
 	if not os.path.exists(args.output_path):
