@@ -2,15 +2,16 @@ import os
 import argparse
 import pandas as pd
 import tkinter as tk
+from pathlib import Path
 from PIL import Image, ImageTk
 
-def display_images(mp4_name, sync_images_path, max_width, max_height):
-    mp4_name = mp4_name[:-4]
+def display_images(video_name, ecog_name, sync_images_path, max_width, max_height):
+    video_name = video_name[:-4]
     image_names = [
-        mp4_name + "_corr.png",
-        mp4_name + "_whole.png",
-        mp4_name + "_two_mins.png",
-        mp4_name + "_beginning.png"
+        video_name + "_" + ecog_name + "_corr.png",
+        video_name + "_" + ecog_name + "_whole.png",
+        video_name + "_" + ecog_name + "_two_mins.png",
+        video_name + "_" + ecog_name + "_beginning.png",
     ]
 
     images = []
@@ -26,37 +27,43 @@ def display_images(mp4_name, sync_images_path, max_width, max_height):
 
     return images
 
-def update_quality_status(mp4_name, status):
-    df.loc[df['mp4_name'] == mp4_name, 'passed_quality_test'] = status
+def update_quality_status(video_name, status):
+    df.loc[df['video_name'] == video_name, 'passed_quality_test'] = status
     df.to_csv(args.csv_log_table, index=False)
 
 def key_pressed(event):
     if event.keysym == "Right":
-        update_quality_status(mp4_name_entry.get(), 1)
+        update_quality_status(video_name_entry.get(), 1)
     elif event.keysym == "Left":
-        update_quality_status(mp4_name_entry.get(), 0)
+        update_quality_status(video_name_entry.get(), 0)
     next_image()
 
 def next_image():
     global index
     index += 1
-    if index < len(mp4_names):
-        mp4_name = mp4_names[index]
-        # if column "sync_failed" is 1, then skip this video (find the row based on mp4_name)
-        while df[df["mp4_name"] == mp4_name]["sync_failed"].values[0] == 1:
-            update_quality_status(mp4_name, 0)
+    if index < len(video_names):
+        video_name = video_names[index]
+        ecog_name = ecog_names[index]
+        print(ecog_name)
+        # if column "sync_failed" is 1, then skip this video (find the row based on video_name)
+        while (
+            df[df["video_name"] == video_name]["sync_failed"].values[0] == 1
+        ) or ecog_name == "":
+            update_quality_status(video_name, 0)
             index += 1
-            if index >= len(mp4_names):
+            if index >= len(video_names):
                 root.quit()
                 return
-            mp4_name = mp4_names[index]
-        
-        images = display_images(mp4_name, args.sync_images, max_width=900, max_height=500)  # Adjust max_width and max_height as needed
+            video_name = video_names[index]
+            ecog_name = ecog_names[index]
+            print(ecog_name)
+
+        images = display_images(video_name, ecog_name, args.sync_images, max_width=900, max_height=500)  # Adjust max_width and max_height as needed
         for i, img_label in enumerate(img_labels):
             img_label.config(image=images[i])
             img_label.image = images[i]  # Keep reference to prevent garbage collection
-        mp4_name_entry.delete(0, tk.END)
-        mp4_name_entry.insert(0, mp4_name)
+        video_name_entry.delete(0, tk.END)
+        video_name_entry.insert(0, video_name)
         root.update()
     else:
         root.quit()
@@ -90,7 +97,12 @@ if __name__ == "__main__":
     df = pd.read_csv(args.csv_log_table)
     create_quality_column_if_not_exists(df)
 
-    mp4_names = df[df["passed_quality_test"].isnull()]["mp4_name"].tolist()
+    video_names = df[df["passed_quality_test"].isnull()]["video_name"].tolist()
+    ecog_paths = df[df["passed_quality_test"].isnull()]["path_ecog"].tolist()
+
+    ecog_names = [
+        os.path.basename(str(Path(n).parent)) if n == n else "" for n in ecog_paths
+    ]
 
     root = tk.Tk()
     root.title("Manual Quality Control")
@@ -99,7 +111,7 @@ if __name__ == "__main__":
     for i, label in enumerate(img_labels):
         label.grid(row=i // 2, column=i % 2, padx=5, pady=5, sticky="nsew")  # Use sticky to fill the label
 
-    mp4_name_entry = tk.Entry(root)
-    mp4_name_entry.grid(row=2, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
+    video_name_entry = tk.Entry(root)
+    video_name_entry.grid(row=2, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
 
     main()

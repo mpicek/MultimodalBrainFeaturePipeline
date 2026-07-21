@@ -1,110 +1,171 @@
 import pandas as pd
-import scipy.io
 import numpy as np
-from synchronization_utils import find_data_in_wisci
-import os
 import re
 from datetime import datetime
+import xml.etree.ElementTree as ET
+from pynwb import NWBHDF5IO
+from pathlib import Path
 
-class GettingAccelerometerDataFailed(Exception):
-    pass
+def get_LED_from_nwb(nwb_path):
+    try:
+        with NWBHDF5IO(nwb_path, "r") as io:
+            nwb = io.read()
+            trigger = nwb.processing["behavior"].data_interfaces["Trigger"].data[:]
+            print(trigger.shape)
 
-def get_accelerometer_data(mat_file):
-    """
-    Extracts and processes accelerometer data from a MATLAB file, 
-    interpolating missing values and subsampling to match a specified frequency.
+            trigger = np.nan_to_num(trigger)
+            duration = (
+                trigger.shape[0]
+                / nwb.processing["behavior"].data_interfaces["Trigger"].rate
+            )
 
-    This function performs the following steps:
-    1. Loads accelerometer data from a specified MATLAB file.
-    2. Interpolates missing values (NaNs) linearly to fill gaps in the data.
-    3. Resamples the data to achieve the sampling rate of 30Hz.
-
-    Parameters:
-    - mat_file (str): The path to the MATLAB (.mat) file containing accelerometer data (aka wisci file).
-
-    Returns:
-    - numpy.ndarray: A 2D array of shape (n, 3), where 'n' is the number of subsampled data points in 30Hz.
-      Each row corresponds to a data point, 
-      with columns representing the interpolated and subsampled x, y, and z accelerometer readings, respectively.
-
-    Note:
-    - The function assumes the accelerometer data is stored in the MATLAB file under the key 'STREAMS' > 'Signal_stream_1'.
-    - It is also assumed that the original sampling rate of the accelerometer data is 585.1375 Hz.
-    - The interpolation and subsampling process is designed to synchronize accelerometer data with video data recorded at 30 Hz,
-      by effectively reducing the accelerometer data's sampling rate to match the video frame rate.
-    """
-    
-    mat = scipy.io.loadmat(mat_file)
-
-    acc_stream, _ = find_data_in_wisci(mat, 'raccx')
-
-    data_acc = mat['STREAMS'][acc_stream][0][0]['data'][0][0][:,:,0].T
-    df = pd.DataFrame(data_acc, columns=['x', 'y', 'z'])
-    oversampled = df.interpolate(method='linear', axis=0).bfill()
-
-    interpolated_data = np.column_stack((oversampled['x'], oversampled['y'], oversampled['z']))
-
-    duration = find_wisci_duration(mat, acc_stream)
-
-    return interpolated_data, duration
-
-
-def get_LED_data(mat_file):
-    mat = scipy.io.loadmat(mat_file)
-
-    led_stream, led_index = find_data_in_wisci(mat, 'tr7', 'tr2')
-    led_data = mat['STREAMS'][led_stream][0][0]['data'][0][0][:,:,0][led_index].T
-
-    df = pd.DataFrame(led_data, columns=['led'])
-    # we remove the nans by interpolating -> the freq is the same as the highest freq of wisci
-    original_freq = df.interpolate(method='linear', axis=0).bfill()
-
-    duration = find_wisci_duration(mat, led_stream)
-    
-    return original_freq['led'], duration
-
-
-def find_wisci_duration(mat, stream_name):
-    """
-    Returns in seconds!!
-    """
-    start = float(mat['STREAMS'][stream_name][0][0]['t_start'][0][0][0][0])
-    stop = float(mat['STREAMS'][stream_name][0][0]['t_stop'][0][0][0][0])
-    return stop - start
-
-def find_corresponding_wisci(mp4_filename, wisci_path):
-    # Extract datetime from mp4 filename
-    mp4_datetime = re.search(r'(\d{2}_\d{2}_\d{4}_\d{4}_\d{2})', mp4_filename).group(0)
-    mp4_datetime = datetime.strptime(mp4_datetime, '%d_%m_%Y_%H%M_%S')
-    
-    # Find .mat files in the directory and subdirectories
-    mat_files = []
-    for root, dirs, files in os.walk(wisci_path):
-        for file in files:
-            if file.endswith('.mat'):
-                mat_files.append(os.path.join(root, file))
-    
-    # Function to extract datetime from .mat filename
-    def extract_datetime(mat_filename):
-        mat_datetime = re.search(r'(\d{4}_\d{2}_\d{2}_\d{2}_\d{2})', mat_filename).group(0)
-        return datetime.strptime(mat_datetime, '%Y_%m_%d_%H_%M')
-
-    # Filter out invalid .mat files that don't contain datetime    
-    valid_mat_files = []
-    for mat_file in mat_files:
+            return trigger, duration
+    except:  # noqa: E722
         try:
-            valid_mat_files.append((mat_file, extract_datetime(mat_file)))
+            with NWBHDF5IO(nwb_path, "r") as io:
+                nwb = io.read()
+                trigger = (
+                    nwb.processing["behavior"].data_interfaces["trigger_ch"].data[:]
+                )
+                trigger = np.nan_to_num(trigger)
+                duration = (
+                    trigger.shape[0]
+                    / nwb.processing["behavior"].data_interfaces["trigger_ch"].rate
+                )
+                return trigger, duration
         except:
-            pass
+            print(f"No trigger? check file {nwb_path}")
+            return
 
-    valid_mat_files.sort(key=lambda x: x[1])  # Sort by datetime
 
-    # Find the closest lower time .mat file
-    closest_mat_file = None
-    for mat_file, mat_datetime in valid_mat_files:
-        if mat_datetime <= mp4_datetime:
-            closest_mat_file = mat_file
-        else:
-            break
-    
-    return closest_mat_file
+def get_duration_osbot(video_path):
+    timestamps_path = re.sub(r"\.mkv$", "_timestamps.csv", video_path, flags=re.IGNORECASE)
+    final_time = pd.read_csv(timestamps_path)["pts_time"].values[-1]
+    return final_time
+
+
+def get_begin_and_duration_osbot(file_path):
+    df_path = re.sub(r"\.mkv$", "_timestamps.csv", file_path, flags=re.IGNORECASE)
+    df_timestamps = pd.read_csv(df_path)
+    begin = datetime.fromtimestamp(df_timestamps["demux_timestamp"][0])
+    end = datetime.fromtimestamp(
+        df_timestamps["demux_timestamp"][len(df_timestamps) - 1]
+    )
+
+    duration = end - begin
+
+    return begin.timestamp(), duration.total_seconds()
+
+
+def get_begin_and_duration_mp4(file_path):
+    tree = ET.parse(re.sub(r"\.mp4$", "M01.XML", file_path, flags=re.IGNORECASE))
+    root = tree.getroot()
+
+    # --- Extract values ---
+    frames = int(root.find(".//{*}Duration").attrib["value"])
+    fps = int(root.find(".//{*}LtcChangeTable").attrib["tcFps"])
+
+    creation_str = root.find(".//{*}CreationDate").attrib["value"]
+
+    # --- Parse creation date ---
+    dt = datetime.fromisoformat(creation_str)
+    begin = dt.timestamp()
+
+    duration_seconds = frames / fps
+
+    return begin, duration_seconds
+
+
+def get_begin_and_duration_nwb(file_path):
+
+    with NWBHDF5IO(file_path, "r") as io:
+        nwbfile = io.read()
+        begin = nwbfile.session_start_time
+        duration = (
+            nwbfile.acquisition["RawEcoG"].data.shape[0]
+            / nwbfile.acquisition["RawEcoG"].rate
+        )
+        """duration = (
+            nwbfile.processing["behavior"].data_interfaces["Trigger"].data.shape[0]
+            / nwbfile.processing["behavior"].data_interfaces["Trigger"].rate
+        )"""
+
+    return begin.timestamp(), duration
+
+
+def get_duration_mp4(path_video):
+
+    tree = ET.parse(re.sub(r"\.mp4$", "M01.XML", path_video, flags=re.IGNORECASE))
+    root = tree.getroot()
+
+    # --- Extract values ---
+    frames = int(root.find(".//{*}Duration").attrib["value"])
+    fps = int(root.find(".//{*}LtcChangeTable").attrib["tcFps"])
+    duration_seconds = frames / fps
+
+    return duration_seconds
+
+
+def find_corresponding_nwbs(mp4_total_path, mp4_root_path, ecog_path):
+
+    relative = Path(mp4_total_path).relative_to(mp4_root_path)
+    first_folder = relative.parts[0]  # name of the session folder
+
+    ecog_to_check_path = Path(ecog_path) / first_folder
+
+    files_nwb = [str(file) for file in Path(ecog_to_check_path).rglob("*.nwb*")]
+
+    df = pd.DataFrame(columns=["path", "type", "begin", "duration"])
+
+    for nwb in files_nwb:
+        begin, duration = get_begin_and_duration_nwb(nwb)
+        toadd = pd.DataFrame(
+            [{"path": nwb, "type": "nwb", "begin": begin, "duration": duration}]
+        )
+        df = pd.concat([df, toadd])
+    # add mp4 infos
+    mp4_total_path_lower = mp4_total_path.lower()
+    if mp4_total_path_lower.endswith("mkv"):
+        begin, duration = get_begin_and_duration_osbot(mp4_total_path)
+    elif mp4_total_path_lower.endswith(".mp4"):
+        begin, duration = get_begin_and_duration_mp4(mp4_total_path)
+    toadd = pd.DataFrame(
+        [
+            {
+                "path": mp4_total_path,
+                "type": "video",
+                "begin": begin,
+                "duration": duration,
+            }
+        ]
+    )
+    df = pd.concat([df, toadd])
+    overlaps = find_overlaps(df, "video", "nwb")
+    return overlaps[0]["overlapping_type2_paths"]
+
+
+def find_overlaps(df, type1, type2):
+    # Prepare start/end columns
+    df = df.copy()
+    df["start"] = df["begin"]
+    df["end"] = df["begin"] + df["duration"]
+
+    df1 = df[df["type"] == type1]
+    df2 = df[df["type"] == type2]
+
+    results = []
+
+    for _, row1 in df1.iterrows():
+        overlaps = df2[(df2["start"] < row1["end"]) & (row1["start"] < df2["end"])]
+
+        results.append(
+            {
+                "type1_path": row1["path"],
+                "type1_start": row1["start"],
+                "type1_end": row1["end"],
+                "overlapping_type2_paths": overlaps["path"].tolist(),
+                "overlapping_rows": overlaps,  # optional: keep full rows
+            }
+        )
+
+    return results

@@ -15,9 +15,9 @@ class SyncLogger:
         self.log_table_path = log_table_path
         self.columns = [
             # and these are for the synchronization
-            'mp4_name',
-            'mp4_length',
-            'path_wisci',
+            'video_name',
+            'video_length',
+            'path_ecog',
             'corr',
             'lag',
             'sync_error_msg',
@@ -34,26 +34,26 @@ class SyncLogger:
         self.log_df = None
 
 
-    def process_new_file(self, mp4_name):
+    def process_new_file(self, video_name):
         """
         Start logging a new file by appending a row with the filename.
         
         Parameters:
         - filename: The name of the file being processed.
         """
-        if not self.original_df['mp4_name'].str.contains(mp4_name).any():
+        if not self.original_df['video_name'].str.contains(video_name).any():
 
             filled_columns = {column: None for column in self.columns}
-            filled_columns['mp4_name'] = mp4_name
+            filled_columns['video_name'] = video_name
 
             self.log_df = pd.DataFrame([filled_columns])
             # self.log_df = pd.concat([self.log_df, new_row], ignore_index=True)
         
         else:
-            raise FileAlreadySynchronized(f"File {mp4_name} already exists in the log.")
+            raise FileAlreadySynchronized(f"File {video_name} already exists in the log.")
 
     
-    def update_log(self, mp4_name, column, value):
+    def update_log(self, video_name, column, value):
         """
         Update the log for a specific file and column.
         
@@ -63,10 +63,10 @@ class SyncLogger:
         - value: The new value for the column.
         """
         # Find the row index for the given filename. Assumes filename is unique for each row.
-        row_index = self.log_df[self.log_df['mp4_name'] == mp4_name].index[0]
+        row_index = self.log_df[self.log_df['video_name'] == video_name].index[0]
         self.log_df.at[row_index, column] = value
     
-    def get_value(self, mp4_name, column):
+    def get_value(self, video_name, column):
         """
         Get the value of a specific column for a specific file.
         
@@ -78,7 +78,7 @@ class SyncLogger:
         - The value of the column for the given file.
         """
         # Find the row index for the given filename. Assumes filename is unique for each row.
-        row_index = self.log_df[self.log_df['mp4_name'] == mp4_name].index[0]
+        row_index = self.log_df[self.log_df['video_name'] == video_name].index[0]
         return self.log_df.at[row_index, column]
     
 
