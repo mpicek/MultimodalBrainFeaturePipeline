@@ -6,26 +6,28 @@ def smooth(y, box_pts):
     return gaussian_filter(y, box_pts)
 from LED_video_main import crop_subsampled_LED_red_channel_from_video_for_std
 
-N_FRAMES_TO_COMPUTE_LED_STD_FROM = 9000
+N_FRAMES_TO_COMPUTE_LED_STD_FROM = 40 # only 40 needed because we are only interested in the position of the LED, not the signal itself
 DOWNSCALE_FACTOR = 2
 DOWNSAMPLE_FRAMES_FACTOR = 15 # some blinks are very short, so we can't downsample too much
 
 def extract_led_position_folder(video_folder, output_folder, n_frames, downscale_factor, downsample_frames_factor, extension):
 
+    extension = extension.lower()
+
     processed_files = os.listdir(output_folder)
-    processed_video_files = [os.path.basename(file)[:-len('_LED_position.npy')] + extension for file in processed_files if file.endswith('_LED_position.npy')]
+    processed_video_files = [(os.path.basename(file)[:-len('_LED_position.npy')] + extension).lower() for file in processed_files if file.endswith('_LED_position.npy')]
 
     print("Looking for video files in folder:", video_folder)
     video_paths = []
     for root, _, files in os.walk(video_folder):
         for file in files:
-            if file.endswith(extension):
+            if file.lower().endswith(extension):
                 video_paths.append(os.path.join(root, file))
 
     total_videos = len(video_paths)
 
     for i, path_video in enumerate(video_paths, start=1):
-        if os.path.basename(path_video) in processed_video_files:
+        if os.path.basename(path_video).lower() in processed_video_files:
             print(f"Processing: {i}/{total_videos} - {path_video} already processed. Skipping")
             continue
         print(f"Processing: {i}/{total_videos} - {path_video}")
@@ -62,9 +64,9 @@ if __name__ == "__main__":
     parser.add_argument("output_folder", help="Where to put output.")
     parser.add_argument(
         "extension",
-        type=lambda v: v if v.startswith(".") else f".{v}",
-        choices=[".MP4", ".mkv"],
-        help="video extension (.MP4 or .mkv)",
+        type=lambda v: (v if v.startswith(".") else f".{v}").lower(),
+        choices=[".mp4", ".mkv"],
+        help="video extension (.mp4 or .mkv, case-insensitive)",
     )
 
     args = parser.parse_args()

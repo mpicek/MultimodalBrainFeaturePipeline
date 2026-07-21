@@ -3,7 +3,6 @@ from skimage import filters, morphology
 from scipy import signal
 import matplotlib.pyplot as plt
 import cv2
-import pyrealsense2 as rs
 
 def get_LED_mask(video_array, visualize_pipeline=False, cropped_LED_image_colorful=None, save_vizualization_to=None):
     """
