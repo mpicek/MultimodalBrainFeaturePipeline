@@ -18,6 +18,7 @@ def crop_subsampled_LED_red_channel_from_video_for_std(video_path, n_frames, dow
     - video_path (str): The file path to the video.
     - n_frames (int): The number of frames from the start of the video to process.
     - downscale_factor (int): By how much to downsample the cropped image of the LED (to save space)
+    - downsample_frames_factor (int): By how much to downsample the frames (to save space)
 
     Returns:
     - tuple: subsampled_video_array (np.ndarray): A 3D NumPy array containing the cropped red channel of the selected ROI
