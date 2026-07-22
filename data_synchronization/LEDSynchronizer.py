@@ -11,6 +11,9 @@ from wisci_utils import (
     find_corresponding_nwbs,
     get_duration_mp4,
     get_duration_osbot,
+    get_begin_and_duration_nwb,
+    get_begin_and_duration_osbot,
+    get_begin_and_duration_mp4,
 )
 import traceback
 from scipy.signal import resample
@@ -20,6 +23,7 @@ import psutil
 
 ECOG_FREQ = 585.9375  # Hz, the sampling frequency of the ecog device
 PLOT_AROUND_SAMPLES = int(15 * ECOG_FREQ) # number of samples to plot around the lag point (15 seconds worth of samples at 585 Hz)
+SYNC_SEARCH_MARGIN_SECONDS = 120  # search +/- this many seconds around the wall-clock-estimated lag, instead of the whole (possibly periodic) recording
 
 mem_bar = None  # dedicated tqdm line for live memory readout, set up in __main__
 
@@ -32,6 +36,34 @@ def log_memory(label=""):
         mem_bar.refresh()
     else:
         print(text)
+
+
+def robust_zscore(x, eps=1e-8):
+    median = np.median(x)
+    mad = np.median(np.abs(x - median))
+    scale = 1.4826 * mad  # normal-consistent estimate of std from the MAD
+    if scale < eps:
+        # MAD collapses to 0 for pulse-like signals that sit at one constant value more than half
+        # the time (e.g. the ecog trigger channel while the LED is off) -- fall back to std so the
+        # scale doesn't blow up to a tiny near-zero divisor
+        scale = np.std(x)
+    return (x - median) / (scale + eps)
+
+
+def plot_with_used_window(ax, arr, x_offset, used_start, used_end, color, label, pale_alpha=0.15, strong_alpha=0.8):
+    n = len(arr)
+    local_start = int(np.clip(used_start - x_offset, 0, n))
+    local_end = int(np.clip(used_end - x_offset, 0, n))
+    x = np.arange(n) + x_offset
+
+    if local_start > 0:
+        ax.plot(x[:local_start], arr[:local_start], color=color, alpha=pale_alpha)
+    if local_end < n:
+        ax.plot(x[local_end:], arr[local_end:], color=color, alpha=pale_alpha)
+    if local_end > local_start:
+        ax.plot(x[local_start:local_end], arr[local_start:local_end], color=color, alpha=strong_alpha, label=label)
+    else:
+        ax.plot([], [], color=color, alpha=strong_alpha, label=label)
 
 
 class LedSynchronizer:
@@ -68,7 +100,7 @@ class LedSynchronizer:
         if self.sync_images_folder is not None and not os.path.exists(self.sync_images_folder):
             os.makedirs(self.sync_images_folder)
 
-    def sync_and_optimize_freq(self, ecog_signal, forehead, accelerometer_duration, video_duration, original_video_basename=None, ecog_basename=None):
+    def sync_and_optimize_freq(self, ecog_signal, forehead, accelerometer_duration, video_duration, original_video_basename=None, ecog_basename=None, expected_lag_seconds=None):
         # trying different frequencies as ecog and realsense are both imprecise in their sampling
         # frequencies so I adjust it like this - we find the freq that gets the best result :)
         # print("SYNCING. ACCELEROMETR DATA LENGTH:", len(ecog_signal))
@@ -80,6 +112,22 @@ class LedSynchronizer:
 
         # upsample the video to the ecog frequency
         new_num_samples = int(len(forehead) * (ecog_freq / video_freq))
+
+        # restrict the search to a window around the wall-clock-estimated lag, instead of the
+        # whole (possibly hours-long, periodically-blinking) ecog recording -- avoids picking up
+        # a spurious correlation peak from a repeat of the same LED flash elsewhere in the recording
+        margin_samples = int(SYNC_SEARCH_MARGIN_SECONDS * ecog_freq)
+        max_resampled_len = int(new_num_samples + 2000)  # upper bound of the resample search below
+        if expected_lag_seconds is not None:
+            expected_lag_samples = int(round(expected_lag_seconds * ecog_freq))
+            window_start = max(0, expected_lag_samples - margin_samples)
+            window_end = min(len(ecog_signal), expected_lag_samples + margin_samples + max_resampled_len)
+            if window_end - window_start < max_resampled_len:
+                print(f"Expected lag {expected_lag_seconds:.1f}s (+/- {SYNC_SEARCH_MARGIN_SECONDS}s) falls outside the ecog recording -- falling back to full-signal search.")
+                window_start, window_end = 0, len(ecog_signal)
+        else:
+            window_start, window_end = 0, len(ecog_signal)
+        ecog_search_window = ecog_signal[window_start:window_end]
 
         best_corr = -1
         best_lag = 0
@@ -93,7 +141,8 @@ class LedSynchronizer:
             resampled_video = resample(forehead, int(n_samples))
             # plot both signals
             log_memory(f"before resample {n_samples}")
-            corr, lag, corr_array = self.synchronize_by_LED(ecog_signal, resampled_video)
+            corr, lag, corr_array = self.synchronize_by_LED(ecog_search_window, resampled_video)
+            lag = lag + window_start  # convert back to an index into the full ecog_signal
             log_memory("after correlate")
             corrs.append(corr)
             if corr > best_corr:
@@ -168,10 +217,19 @@ class LedSynchronizer:
             plt.close(fig)
 
             # --- Whole signal plot -------------------------------------------------------
+            # the ecog trace is drawn pale outside the window that was actually searched,
+            # and solid within it, to make the effect of the timestamp-based windowing visible
             _, ax = plt.subplots(figsize=(15, 5), dpi=200)
 
-            ax.plot(np.arange(len(sig_a)), sig_a, color=color_a, label=label_a, alpha=0.5)
-            ax.plot(np.arange(len(sig_b)) + plot_lag, sig_b, color=color_b, label=label_b, alpha=0.5)
+            if best_lag < 0:
+                video_sig, video_offset, video_color, video_label = sig_a, 0, color_a, label_a
+                ecog_sig, ecog_offset, ecog_color, ecog_label = sig_b, plot_lag, color_b, label_b
+            else:
+                ecog_sig, ecog_offset, ecog_color, ecog_label = sig_a, 0, color_a, label_a
+                video_sig, video_offset, video_color, video_label = sig_b, plot_lag, color_b, label_b
+
+            ax.plot(np.arange(len(video_sig)) + video_offset, video_sig, color=video_color, label=video_label, alpha=0.5)
+            plot_with_used_window(ax, ecog_sig, ecog_offset, window_start, window_end, color=ecog_color, label=ecog_label)
             ax.plot(np.arange(int(ECOG_FREQ)), np.zeros((int(ECOG_FREQ),)), color="black", label="1s stretch", linewidth=2)
 
             ax.legend()
@@ -180,7 +238,7 @@ class LedSynchronizer:
             plt.close(fig)
 
             plt.figure()
-            plt.plot(best_corr_array)
+            plt.plot(np.arange(window_start, window_start + len(best_corr_array)), best_corr_array)
 
             plt.savefig(os.path.join(self.sync_images_folder, original_video_basename_noext + "_" + ecog_basename + "_corr.png",))
             plt.close(fig)
@@ -197,6 +255,11 @@ class LedSynchronizer:
 
     def sync_with_led(self, video_fullpath, led_signal_full_path, ecog_file, log=True, output_path_manual=None):
         ecog_signal, ecog_duration = get_LED_from_nwb(ecog_file)
+        try:
+            ecog_begin, _ = get_begin_and_duration_nwb(ecog_file)
+        except Exception:
+            ecog_begin = None
+            print(f"Could not read session_start_time from {ecog_file}, will fall back to full-signal search.")
 
         video_led = np.load(led_signal_full_path)
         video_basename = os.path.basename(video_fullpath)
@@ -207,28 +270,39 @@ class LedSynchronizer:
             video_duration = get_duration_osbot(video_fullpath)
             print(f"Video duration from .mkv timestamps: {video_duration} seconds, difference from the default duration: {video_duration - (0.02 * (len(video_led) - 1) + 1)} seconds")
             # video_duration = 0.02 * (len(video_led) - 1) + 1
+            try:
+                video_begin, _ = get_begin_and_duration_osbot(video_fullpath)
+            except Exception:
+                video_begin = None
         elif video_fullpath_lower.endswith(".mp4"):
             try:
-                video_duration = get_duration_mp4(video_fullpath)
+                video_begin, video_duration = get_begin_and_duration_mp4(video_fullpath)
                 print(video_duration)
             except:
                 video_duration = (
                     len(video_led) / 30.0
                 )  # assume fs of 30 if cannot read fs... maybe need something different
+                video_begin = None
                 print("default fs")
 
-        # video_led = video_led - np.min(video_led[1000:]) #np.mean(sig1) # TODO: here was min(), but I changed it because at the beginning the lighting is very low
-        # ecog_signal = ecog_signal - np.min(ecog_signal[1000:]) # TODO: here was min(), but I changed it because at the beginning the lighting is very low
-        # video_led = video_led / np.max(video_led) - 0.5
-        # ecog_signal = ecog_signal / np.max(ecog_signal) - 0.5
+        if ecog_begin is not None and video_begin is not None:
+            expected_lag_seconds = video_begin - ecog_begin
+            print(f"Approximate lag from wall-clock timestamps: {expected_lag_seconds:.1f}s -> restricting sync search to +/-{SYNC_SEARCH_MARGIN_SECONDS}s around it")
+        else:
+            expected_lag_seconds = None
+            print("No reliable wall-clock timestamps for this video/ecog pair, falling back to full-signal search.")
 
-        video_led = video_led - np.max(video_led) #np.mean(sig1) # TODO: here was min(), but I changed it because at the beginning the lighting is very low
-        ecog_signal = ecog_signal - np.min(ecog_signal) # TODO: here was min(), but I changed it because at the beginning the lighting is very low
-        video_led = video_led / (np.max(video_led) - min(video_led[90:-90])) + 0.5
-        ecog_signal = ecog_signal / np.max(ecog_signal) - 0.5
+        # median/MAD z-score: keeps the "LED off" baseline near 0 for both signals. The previous
+        # min/max rescale left a large non-zero DC term (both signals sit near one extreme of
+        # [-0.5, 0.5] while the LED is off), which dominates the cross-correlation sum at every lag
+        # and makes the find_peaks height threshold in sync_and_optimize_freq meaningless. Median/MAD
+        # are also robust to the few dim frames at the start/end of a video, so the manual edge-trim
+        # previously needed there is no longer necessary.
+        video_led = robust_zscore(video_led)
+        ecog_signal = robust_zscore(ecog_signal)
 
         if video_duration > 15: # process videos that are at least 15s long
-            best_corr, best_lag, best_n_samples, best_total_peaks, best_second_largest_corr_peak = self.sync_and_optimize_freq(ecog_signal, video_led, ecog_duration, video_duration, video_basename, ecog_basename)
+            best_corr, best_lag, best_n_samples, best_total_peaks, best_second_largest_corr_peak = self.sync_and_optimize_freq(ecog_signal, video_led, ecog_duration, video_duration, video_basename, ecog_basename, expected_lag_seconds=expected_lag_seconds)
             print(f"Going to update log")
             print(f"File: {video_basename}")
             print(f"\tBest correlation: {best_corr}\n\tLag: {best_lag}")
