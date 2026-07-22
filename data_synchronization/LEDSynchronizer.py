@@ -238,14 +238,14 @@ class LedSynchronizer:
         plt.savefig(out_path("corr"))
         plt.close(fig)
 
-    def sync_and_optimize_freq(self, ecog_signal, forehead, accelerometer_duration, video_duration, original_video_basename=None, ecog_basename=None, expected_lag_seconds=None):
+    def sync_and_optimize_freq(self, ecog_signal, video_signal, video_duration, original_video_basename=None, ecog_basename=None, expected_lag_seconds=None):
         # trying different frequencies as ecog and realsense are both imprecise in their sampling
         # frequencies so I adjust it like this - we find the freq that gets the best result :)
         ecog_freq = ECOG_FREQ
-        video_freq = len(forehead) / video_duration
+        video_freq = len(video_signal) / video_duration
 
         # upsample the video to the ecog frequency
-        new_num_samples = int(len(forehead) * (ecog_freq / video_freq))
+        new_num_samples = int(len(video_signal) * (ecog_freq / video_freq))
 
         # restrict the search to a window around the wall-clock-estimated lag, instead of the
         # whole (possibly hours-long, periodically-blinking) ecog recording -- avoids picking up
@@ -272,7 +272,7 @@ class LedSynchronizer:
         search_desc = f"{original_video_basename or '?'} vs {ecog_basename or '?'}"
         for n_samples in tqdm(np.linspace(new_num_samples - 2000, new_num_samples + 2000, 250), desc=search_desc, position=2, leave=False):
             log_memory(f"before resample {n_samples}")
-            resampled_video = resample(forehead, int(n_samples))
+            resampled_video = resample(video_signal, int(n_samples))
             log_memory(f"after resample, before correlate {n_samples}")
             corr, lag, corr_array = self.synchronize_by_LED(ecog_search_window, resampled_video)
             lag = lag + window_start  # convert back to an index into the full ecog_signal
@@ -306,6 +306,7 @@ class LedSynchronizer:
             tqdm.write(f"Could not read session_start_time from {ecog_file}, will fall back to full-signal search.")
 
         video_led = np.load(led_signal_full_path)
+        original_num_frames_video = len(video_led)  # frame count before any resampling -- needed downstream to map ECoG samples <-> video frames
         video_basename = os.path.basename(video_fullpath)
         ecog_basename = os.path.basename(str(Path(ecog_file).parent))
         video_fullpath_lower = video_fullpath.lower()
@@ -344,7 +345,7 @@ class LedSynchronizer:
         ecog_signal = robust_zscore(ecog_signal)
 
         if video_duration > 15: # process videos that are at least 15s long
-            best_corr, best_lag, best_n_samples, best_total_peaks, best_second_largest_corr_peak = self.sync_and_optimize_freq(ecog_signal, video_led, ecog_duration, video_duration, video_basename, ecog_basename, expected_lag_seconds=expected_lag_seconds)
+            best_corr, best_lag, best_n_samples, best_total_peaks, best_second_largest_corr_peak = self.sync_and_optimize_freq(ecog_signal, video_led, video_duration, video_basename, ecog_basename, expected_lag_seconds=expected_lag_seconds)
             tqdm.write(f"  -> corr={best_corr:.1f}  lag={best_lag} ({best_lag / ECOG_FREQ:.2f}s)")
             sync_failed = 0
 
@@ -358,10 +359,12 @@ class LedSynchronizer:
 
         if log:
             self.log.update_log(video_basename, 'video_duration', video_duration)
-            self.log.update_log(video_basename, 'frames', best_n_samples)
+            self.log.update_log(video_basename, 'original_num_frames_video', original_num_frames_video)
+            self.log.update_log(video_basename, 'best_resampled_video_num_frames', int(best_n_samples))
             self.log.update_log(video_basename, 'path_ecog', ecog_file)
             self.log.update_log(video_basename, 'corr', best_corr)
             self.log.update_log(video_basename, 'lag', best_lag)
+            self.log.update_log(video_basename, 'expected_lag_seconds', expected_lag_seconds)
             self.log.update_log(video_basename, 'sync_failed', sync_failed)
             self.log.update_log(video_basename, 'additional_peaks_per_million', (best_total_peaks-1)/len(ecog_signal) * 1000000)
             self.log.update_log(video_basename, 'best_second_largest_corr_peak', best_second_largest_corr_peak)

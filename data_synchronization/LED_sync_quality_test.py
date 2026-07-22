@@ -4,6 +4,48 @@ import pandas as pd
 import tkinter as tk
 from pathlib import Path
 from PIL import Image, ImageTk
+from LEDSynchronizer import ECOG_FREQ
+
+# how far the LED-derived lag is allowed to drift from the wall-clock ("expected") estimate
+# before we flag the sync as suspicious, in seconds
+EXPECTED_LAG_TOLERANCE_SECONDS = 10
+
+STATUS_OK_COLOR = "#1a7f37"       # green: LED lag and wall-clock estimate agree
+STATUS_MISMATCH_COLOR = "#c0152f"  # red: they disagree by more than the tolerance
+STATUS_UNKNOWN_COLOR = "#8a6d00"   # amber: no wall-clock estimate to compare against
+
+
+def sync_status_message(video_name):
+    """
+    Cross-check the LED-derived lag against the independent wall-clock estimate
+    (video timestamp vs ecog session_start_time) that LEDSynchronizer.py used to restrict
+    its search window. These come from unrelated sources, so close agreement is evidence
+    the sync locked onto the correct LED flash rather than a periodic repeat elsewhere in
+    the (possibly hours-long) ecog recording.
+    """
+    row = df[df["video_name"] == video_name].iloc[0]
+    lag = row.get("lag")
+    expected_lag_seconds = row.get("expected_lag_seconds") if "expected_lag_seconds" in df.columns else None
+
+    if lag is None or pd.isna(lag) or expected_lag_seconds is None or pd.isna(expected_lag_seconds):
+        return (
+            "Cannot validate against timestamps -- no wall-clock estimate for this video "
+            "(re-run the sync pipeline to backfill 'expected_lag_seconds')",
+            STATUS_UNKNOWN_COLOR,
+        )
+
+    offset = (lag / ECOG_FREQ) - expected_lag_seconds
+    if abs(offset) <= EXPECTED_LAG_TOLERANCE_SECONDS:
+        return (
+            f"LED synchronization is in accordance with the approximate timestamps of the video and ECoG   (offset: {offset:+.1f}s)",
+            STATUS_OK_COLOR,
+        )
+    else:
+        return (
+            f"LED synchronization does NOT correspond to the approximate timestamps of the video and ECoG   (offset: {offset:+.1f}s)",
+            STATUS_MISMATCH_COLOR,
+        )
+
 
 def display_images(video_name, ecog_name, sync_images_path, max_width, max_height):
     video_name = video_name[:-4]
@@ -55,15 +97,16 @@ def open_zoom(idx):
     for label in img_labels:
         label.grid_remove()
     video_name_entry.grid_remove()
-    zoom_label.grid(row=0, column=0, rowspan=GRID_ROWS, columnspan=GRID_COLS, padx=3, pady=3, sticky="nsew")
+    # row 0 is the status_label banner, which stays visible while zoomed in too
+    zoom_label.grid(row=1, column=0, rowspan=GRID_ROWS, columnspan=GRID_COLS, padx=3, pady=3, sticky="nsew")
     zoomed = True
 
 def close_zoom():
     global zoomed
     zoom_label.grid_remove()
     for i, label in enumerate(img_labels):
-        label.grid(row=i // GRID_COLS, column=i % GRID_COLS, padx=3, pady=3, sticky="nsew")
-    video_name_entry.grid(row=GRID_ROWS, column=0, columnspan=GRID_COLS, padx=5, pady=5, sticky="ew")
+        label.grid(row=1 + i // GRID_COLS, column=i % GRID_COLS, padx=3, pady=3, sticky="nsew")
+    video_name_entry.grid(row=1 + GRID_ROWS, column=0, columnspan=GRID_COLS, padx=5, pady=5, sticky="ew")
     zoomed = False
 
 def next_image():
@@ -88,6 +131,9 @@ def next_image():
 
         if zoomed:
             close_zoom()
+
+        status_text, status_color = sync_status_message(video_name)
+        status_label.config(text=status_text, fg=status_color)
 
         images, current_image_paths = display_images(video_name, ecog_name, args.sync_images, max_width=MAX_IMG_WIDTH, max_height=MAX_IMG_HEIGHT)
         for i, img_label in enumerate(img_labels):
@@ -154,15 +200,19 @@ if __name__ == "__main__":
     zoomed = False
     current_image_paths = []
 
+    # row 0: big pass/fail banner comparing the LED-derived lag against the wall-clock estimate
+    status_label = tk.Label(root, font=("Helvetica", 16, "bold"), pady=6)
+    status_label.grid(row=0, column=0, columnspan=GRID_COLS, sticky="ew")
+
     img_labels = [tk.Label(root, cursor="hand2") for _ in range(GRID_COLS * GRID_ROWS)]
     for i, label in enumerate(img_labels):
-        label.grid(row=i // GRID_COLS, column=i % GRID_COLS, padx=3, pady=3, sticky="nsew")  # Use sticky to fill the label
+        label.grid(row=1 + i // GRID_COLS, column=i % GRID_COLS, padx=3, pady=3, sticky="nsew")  # Use sticky to fill the label
         label.bind("<Button-1>", lambda event, idx=i: open_zoom(idx))
 
     zoom_label = tk.Label(root, cursor="hand2")
     zoom_label.bind("<Button-1>", lambda event: close_zoom())
 
     video_name_entry = tk.Entry(root)
-    video_name_entry.grid(row=GRID_ROWS, column=0, columnspan=GRID_COLS, padx=5, pady=5, sticky="ew")
+    video_name_entry.grid(row=1 + GRID_ROWS, column=0, columnspan=GRID_COLS, padx=5, pady=5, sticky="ew")
 
     main()

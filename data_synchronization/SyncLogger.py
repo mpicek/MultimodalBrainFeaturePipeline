@@ -20,6 +20,8 @@ class SyncLogger:
             'path_ecog',
             'corr',
             'lag',
+            'original_num_frames_video',
+            'best_resampled_video_num_frames',
             'sync_error_msg',
             'best_second_largest_corr_peak',
             'sync_failed',
