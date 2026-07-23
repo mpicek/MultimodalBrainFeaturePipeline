@@ -4,7 +4,6 @@ import pandas as pd
 import tkinter as tk
 from pathlib import Path
 from PIL import Image, ImageTk
-from LEDSynchronizer import ECOG_FREQ
 
 # how far the LED-derived lag is allowed to drift from the wall-clock ("expected") estimate
 # before we flag the sync as suspicious, in seconds
@@ -26,15 +25,20 @@ def sync_status_message(video_name):
     row = df[df["video_name"] == video_name].iloc[0]
     lag = row.get("lag")
     expected_lag_seconds = row.get("expected_lag_seconds") if "expected_lag_seconds" in df.columns else None
+    ecog_freq = row.get("ecog_frequency") if "ecog_frequency" in df.columns else None
 
-    if lag is None or pd.isna(lag) or expected_lag_seconds is None or pd.isna(expected_lag_seconds):
+    if (
+        lag is None or pd.isna(lag)
+        or expected_lag_seconds is None or pd.isna(expected_lag_seconds)
+        or ecog_freq is None or pd.isna(ecog_freq)
+    ):
         return (
             "Cannot validate against timestamps -- no wall-clock estimate for this video "
-            "(re-run the sync pipeline to backfill 'expected_lag_seconds')",
+            "(re-run the sync pipeline to backfill 'expected_lag_seconds'/'ecog_frequency')",
             STATUS_UNKNOWN_COLOR,
         )
 
-    offset = (lag / ECOG_FREQ) - expected_lag_seconds
+    offset = (lag / ecog_freq) - expected_lag_seconds
     if abs(offset) <= EXPECTED_LAG_TOLERANCE_SECONDS:
         return (
             f"LED synchronization is in accordance with the approximate timestamps of the video and ECoG   (offset: {offset:+.1f}s)",
