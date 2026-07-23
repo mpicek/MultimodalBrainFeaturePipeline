@@ -83,6 +83,44 @@ def crop_subsampled_LED_red_channel_from_video_for_std(video_path, n_frames, dow
     return subsampled_video_array, ref_point, cropped_LED_image_colorful
 
 
+def get_single_frame_for_led_cropping(video_path, skip_frames=30):
+    """
+    Grab a single frame from partway into the video (skipping the first `skip_frames`, since the
+    very first frames of a recording are often under-exposed/unstable) and let the user select the
+    LED's region of interest on it via ImageCropper.
+
+    Unlike crop_subsampled_LED_red_channel_from_video_for_std, this decodes only ONE frame -- no
+    multi-frame array is built here, since callers that only need the LED's pixel position (not
+    its actual brightness signal over time) don't need more than that. Seeks directly to
+    `skip_frames` instead of reading-and-discarding every frame up to it, to minimize how much of
+    the video needs to be read/decoded -- relevant when the video lives on a remote/network server.
+
+    Returns:
+        ref_point: the two (x, y) corners of the selected ROI, as returned by ImageCropper.
+                   None if the video couldn't be opened or no frame could be read.
+        cropped_LED_image_colorful: the cropped ROI from that one frame, all channels (shape
+                   (height, width, 3)). None on failure.
+    """
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        print("Error: Could not open video.")
+        return None, None
+
+    num_of_frames_of_the_video = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    start_frame = skip_frames if num_of_frames_of_the_video > skip_frames else 0
+    cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+
+    ret, frame = cap.read()
+    cap.release()
+    if not ret:
+        print(f"Error: Could not read frame {start_frame} from {video_path}.")
+        return None, None
+
+    cropper = ImageCropper(frame)
+    cropped_LED_image_colorful, ref_point = cropper.show_and_crop_image()
+    return ref_point, cropped_LED_image_colorful
+
+
 if __name__ == "__main__":
     """
     INPUT:  /path/to/video/video.mp4
