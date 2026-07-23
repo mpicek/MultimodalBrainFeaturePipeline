@@ -1,0 +1,17 @@
+numpy
+pandas
+scipy
+tqdm
+pynwb
+opencv-python
+scikit-image
+matplotlib
+plotly
+Pillow
+#pyrealsense2
+psutil
+
+# Only needed for DLC/ (DeepLabCut-based motion tracking scripts)
+#tensorflow
+#deeplabcut
+#ffmpegio
