@@ -42,25 +42,30 @@ def video_folder_get_LED(video_folder, led_position_folder, output_folder, exten
     processed_files = os.listdir(output_folder)
     processed_video_files = [(os.path.basename(file)[:-len('_LED_signal.npy')] + extension).lower() for file in processed_files if file.endswith('_LED_signal.npy')]
 
+    video_paths = []
     for root, _, files in os.walk(video_folder):
         for file in files:
             if file.lower().endswith(extension):
-                path_video = os.path.join(root, file)
-                video_basename = os.path.splitext(os.path.basename(path_video))[0]
+                video_paths.append(os.path.join(root, file))
 
-                if os.path.basename(path_video).lower() in processed_video_files:
-                    print(f"File {path_video} already processed. Skipping")
-                    continue
+    total_videos = len(video_paths)
 
-                print("Processing file:", path_video)
-                try: # this fails if there is no led_position and binary_mask files => we have to select it manually now
-                    led_position = np.load(os.path.join(led_position_folder, video_basename + '_LED_position.npy'))
-                    binary_mask = np.load(os.path.join(led_position_folder, video_basename + '_LED_binary_mask.npy'))
-                    led_signal = get_LED_signal(path_video, led_position, binary_mask)
-                except Exception as e:
-                    led_signal = get_LED_signal(path_video)
+    for i, path_video in enumerate(video_paths, start=1):
+        video_basename = os.path.splitext(os.path.basename(path_video))[0]
 
-                np.save(os.path.join(output_folder, video_basename + '_LED_signal.npy'), led_signal)
+        if os.path.basename(path_video).lower() in processed_video_files:
+            print(f"Processing: {i}/{total_videos} - {path_video} already processed. Skipping")
+            continue
+
+        print(f"Processing: {i}/{total_videos} - {path_video}")
+        try: # this fails if there is no led_position and binary_mask files => we have to select it manually now
+            led_position = np.load(os.path.join(led_position_folder, video_basename + '_LED_position.npy'))
+            binary_mask = np.load(os.path.join(led_position_folder, video_basename + '_LED_binary_mask.npy'))
+            led_signal = get_LED_signal(path_video, led_position, binary_mask)
+        except Exception as e:
+            led_signal = get_LED_signal(path_video)
+
+        np.save(os.path.join(output_folder, video_basename + '_LED_signal.npy'), led_signal)
 
 
 def main(video_folder, led_position_folder, output_folder, extension):
