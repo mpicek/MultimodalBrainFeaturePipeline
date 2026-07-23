@@ -4,13 +4,12 @@ import argparse
 from scipy.ndimage import gaussian_filter
 def smooth(y, box_pts):
     return gaussian_filter(y, box_pts)
-from LED_video_main import crop_subsampled_LED_red_channel_from_video_for_std
+from LED_video_main import get_single_frame_for_led_cropping
 
-N_FRAMES_TO_COMPUTE_LED_STD_FROM = 40 # only 40 needed because we are only interested in the position of the LED, not the signal itself
 DOWNSCALE_FACTOR = 2
-DOWNSAMPLE_FRAMES_FACTOR = 15 # some blinks are very short, so we can't downsample too much
+FRAMES_TO_SKIP_AT_START = 30  # skip the first few frames, which are often under-exposed/unstable
 
-def extract_led_position_folder(video_folder, output_folder, n_frames, downscale_factor, downsample_frames_factor, extension):
+def extract_led_position_folder(video_folder, output_folder, downscale_factor, extension):
 
     extension = extension.lower()
 
@@ -32,28 +31,25 @@ def extract_led_position_folder(video_folder, output_folder, n_frames, downscale
             continue
         print(f"Processing: {i}/{total_videos} - {path_video}")
         try:
-            subsampled_video_array, ref_point, _ = crop_subsampled_LED_red_channel_from_video_for_std(
+            ref_point, cropped_LED_image_colorful = get_single_frame_for_led_cropping(
                     path_video,
-                    n_frames,
-                    downscale_factor,
-                    downsample_frames_factor
+                    skip_frames=FRAMES_TO_SKIP_AT_START,
                 )
 
-            binary_mask = np.full((subsampled_video_array.shape[1], subsampled_video_array.shape[2]),True,)
+            mask_shape = cropped_LED_image_colorful[..., 2][::downscale_factor, ::downscale_factor].shape
+            binary_mask = np.full(mask_shape, True)
 
             video_basename = os.path.splitext(os.path.basename(path_video))[0]
             np.save(os.path.join(output_folder, video_basename + "_LED_position.npy"),ref_point,)
             np.save(os.path.join(output_folder, video_basename + '_LED_binary_mask.npy'),binary_mask,)
-        except:
+        except Exception:
             print(f"Error with file {path_video}")
 
 
 def main(video_folder, output_folder, extension):
 
-
-
     extract_led_position_folder(
-        video_folder, output_folder, N_FRAMES_TO_COMPUTE_LED_STD_FROM, DOWNSCALE_FACTOR, N_FRAMES_TO_COMPUTE_LED_STD_FROM, extension
+        video_folder, output_folder, DOWNSCALE_FACTOR, extension
     )
 
 
