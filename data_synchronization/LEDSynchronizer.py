@@ -1,19 +1,23 @@
 import numpy as np
 import os
+from datetime import datetime
 from pathlib import Path
 import plotly.graph_objects as go
 import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter
 from scipy import signal
 from scipy.signal import find_peaks
 from SyncLogger import SyncLogger, FileAlreadySynchronized
 from wisci_utils import (
     get_LED_from_nwb,
+    get_ecog_freq_from_nwb,
     find_corresponding_nwbs,
-    get_duration_mp4,
     get_duration_osbot,
     get_begin_and_duration_nwb,
     get_begin_and_duration_osbot,
     get_begin_and_duration_mp4,
+    fit_video_to_ecog_time,
+    format_ecog_sample_as_time,
 )
 import traceback
 from scipy.signal import resample
@@ -21,11 +25,10 @@ from tqdm import tqdm
 import argparse
 import psutil
 
-ECOG_FREQ = 585.9375  # Hz, the sampling frequency of the ecog device
-PLOT_AROUND_SAMPLES = int(15 * ECOG_FREQ) # number of samples to plot around the lag point (15 seconds worth of samples at 585 Hz)
 SYNC_SEARCH_MARGIN_SECONDS = 120  # search +/- this many seconds around the wall-clock-estimated lag, instead of the whole (possibly periodic) recording
 
 mem_bar = None  # dedicated tqdm line for live memory readout, set up in __main__
+
 
 def log_memory(label=""):
     process = psutil.Process(os.getpid())
@@ -50,7 +53,17 @@ def robust_zscore(x, eps=1e-8):
     return (x - median) / (scale + eps)
 
 
-def plot_with_used_window(ax, arr, x_offset, used_start, used_end, color, label, pale_alpha=0.15, strong_alpha=0.8):
+def plot_with_used_window(
+    ax,
+    arr,
+    x_offset,
+    used_start,
+    used_end,
+    color,
+    label,
+    pale_alpha=0.15,
+    strong_alpha=0.8,
+):
     n = len(arr)
     local_start = int(np.clip(used_start - x_offset, 0, n))
     local_end = int(np.clip(used_end - x_offset, 0, n))
@@ -61,12 +74,30 @@ def plot_with_used_window(ax, arr, x_offset, used_start, used_end, color, label,
     if local_end < n:
         ax.plot(x[local_end:], arr[local_end:], color=color, alpha=pale_alpha)
     if local_end > local_start:
-        ax.plot(x[local_start:local_end], arr[local_start:local_end], color=color, alpha=strong_alpha, label=label)
+        ax.plot(
+            x[local_start:local_end],
+            arr[local_start:local_end],
+            color=color,
+            alpha=strong_alpha,
+            label=label,
+        )
     else:
         ax.plot([], [], color=color, alpha=strong_alpha, label=label)
 
 
-def plot_close_up_window(ax, sig_a, sig_b, x_offset, color_a, color_b, label_a, label_b, around, end=False):
+def plot_close_up_window(
+    ax,
+    sig_a,
+    sig_b,
+    x_offset,
+    color_a,
+    color_b,
+    label_a,
+    label_b,
+    around,
+    ecog_freq,
+    end=False,
+):
     """
     Plot `around` samples of sig_a on each side of x_offset (a point in sig_a's index frame),
     with sig_b overlaid on the half where the two signals actually overlap: the right half when
@@ -74,17 +105,50 @@ def plot_close_up_window(ax, sig_a, sig_b, x_offset, color_a, color_b, label_a, 
     the overlap (end=True, sig_b must already be trimmed to the overlapping portion).
     """
     x = np.arange(2 * around)
-    ax.plot(x, sig_a[x_offset - around : x_offset + around], color=color_a, label=label_a)
+    ax.plot(
+        x, sig_a[x_offset - around : x_offset + around], color=color_a, label=label_a
+    )
     if end:
         # NB: sig_b[-around:] would break for around == 0 (Python's -0 == 0, so it would
         # select the *whole* array instead of nothing) -- index from len(sig_b) instead.
-        ax.plot(np.arange(around), sig_b[len(sig_b) - around :], color=color_b, label=label_b, alpha=0.5)
+        ax.plot(
+            np.arange(around),
+            sig_b[len(sig_b) - around :],
+            color=color_b,
+            label=label_b,
+            alpha=0.5,
+        )
     else:
-        ax.plot(np.arange(around) + around, sig_b[:around], color=color_b, label=label_b, alpha=0.5)
-    ax.plot(np.arange(int(ECOG_FREQ)), np.zeros((int(ECOG_FREQ),)), color="black", label="1s stretch", linewidth=2, alpha=0.5)
+        ax.plot(
+            np.arange(around) + around,
+            sig_b[:around],
+            color=color_b,
+            label=label_b,
+            alpha=0.5,
+        )
+    ax.plot(
+        np.arange(int(ecog_freq)),
+        np.zeros((int(ecog_freq),)),
+        color="black",
+        label="1s stretch",
+        linewidth=2,
+        alpha=0.5,
+    )
 
 
-def plot_extended_window(ax, sig_a, sig_b, x_offset, color_a, color_b, label_a, label_b, length, end=False):
+def plot_extended_window(
+    ax,
+    sig_a,
+    sig_b,
+    x_offset,
+    color_a,
+    color_b,
+    label_a,
+    label_b,
+    length,
+    ecog_freq,
+    end=False,
+):
     """
     Plot `length` samples of the overlap between sig_a and sig_b, starting at x_offset
     (end=False) or ending at x_offset (end=True, sig_b must already be trimmed to the
@@ -92,13 +156,33 @@ def plot_extended_window(ax, sig_a, sig_b, x_offset, color_a, color_b, label_a, 
     """
     x = np.arange(length)
     if end:
-        ax.plot(x, sig_a[x_offset - length : x_offset], color=color_a, label=label_a, alpha=0.5)
+        ax.plot(
+            x,
+            sig_a[x_offset - length : x_offset],
+            color=color_a,
+            label=label_a,
+            alpha=0.5,
+        )
         # NB: sig_b[-length:] would break for length == 0, same reasoning as in plot_close_up_window.
-        ax.plot(x, sig_b[len(sig_b) - length :], color=color_b, label=label_b, alpha=0.5)
+        ax.plot(
+            x, sig_b[len(sig_b) - length :], color=color_b, label=label_b, alpha=0.5
+        )
     else:
-        ax.plot(x, sig_a[x_offset : x_offset + length], color=color_a, label=label_a, alpha=0.5)
+        ax.plot(
+            x,
+            sig_a[x_offset : x_offset + length],
+            color=color_a,
+            label=label_a,
+            alpha=0.5,
+        )
         ax.plot(x, sig_b[:length], color=color_b, label=label_b, alpha=0.5)
-    ax.plot(np.arange(int(ECOG_FREQ)), np.zeros((int(ECOG_FREQ),)), color="black", label="1s stretch", linewidth=2)
+    ax.plot(
+        np.arange(int(ecog_freq)),
+        np.zeros((int(ecog_freq),)),
+        color="black",
+        label="1s stretch",
+        linewidth=2,
+    )
 
 
 class LedSynchronizer:
@@ -113,7 +197,16 @@ class LedSynchronizer:
         sigma (int): Sigma of the Gaussian filter for smoothing.
         visualize (bool): Flag to enable or disable visualization of the synchronization process.
     """
-    def __init__(self, video_folder, led_signals_folder, ecog_server_path, log_table_path, sync_images_folder=None, visualize=False):
+
+    def __init__(
+        self,
+        video_folder,
+        led_signals_folder,
+        ecog_server_path,
+        log_table_path,
+        sync_images_folder=None,
+        visualize=False,
+    ):
         """
         Initializes the Synchronizer with paths and settings for data synchronization.
 
@@ -124,18 +217,34 @@ class LedSynchronizer:
             sigma (int): Sigma of the Gaussian filter for smoothing.
             visualize (bool, optional): If True, enables visualization of the process. Defaults to False.
         """
-        self.video_folder = video_folder # path to the video files WITH THE SAVED DURATION IN .NPY FILE!
-        self.led_signals_folder = led_signals_folder # path to the folder with the LED signals
+        self.video_folder = video_folder  # path to the video files WITH THE SAVED DURATION IN .NPY FILE!
+        self.led_signals_folder = (
+            led_signals_folder  # path to the folder with the LED signals
+        )
         self.ecog_server_path = ecog_server_path
         self.log_table_path = log_table_path
         self.log = SyncLogger(log_table_path)
         self.visualize = visualize
         self.sync_images_folder = sync_images_folder
 
-        if self.sync_images_folder is not None and not os.path.exists(self.sync_images_folder):
+        if self.sync_images_folder is not None and not os.path.exists(
+            self.sync_images_folder
+        ):
             os.makedirs(self.sync_images_folder)
 
-    def save_sync_plots(self, ecog_signal, best_signal, best_lag, window_start, window_end, best_corr_array, original_video_basename, ecog_basename):
+    def save_sync_plots(
+        self,
+        ecog_signal,
+        best_signal,
+        best_lag,
+        window_start,
+        window_end,
+        best_corr_array,
+        original_video_basename,
+        ecog_basename,
+        ecog_freq,
+        ecog_begin,
+    ):
         """
         Save the diagnostic plots for one video/ecog synchronization: close-up and extended
         views at both the start AND the end of the overlap (drift over a long recording can
@@ -145,7 +254,10 @@ class LedSynchronizer:
         original_video_basename_noext = os.path.splitext(original_video_basename)[0]
 
         def out_path(suffix):
-            return os.path.join(self.sync_images_folder, f"{original_video_basename_noext}_{ecog_basename}_{suffix}.png")
+            return os.path.join(
+                self.sync_images_folder,
+                f"{original_video_basename_noext}_{ecog_basename}_{suffix}.png",
+            )
 
         if best_lag < 0:
             plot_lag = -best_lag
@@ -164,50 +276,132 @@ class LedSynchronizer:
         overlap_end = plot_lag + overlap_len
         sig_b_overlap = sig_b[:overlap_len]
 
-        grid_width = 585 / (1000 / 150)
+        grid_width = ecog_freq / (1000 / 150)
 
         def add_time_grid(ax, plot_width, base_offset):
-            ax.grid(True, linewidth=0.5, linestyle='--', color='gray', which='both', alpha=0.5)
+            # fine, fixed-spacing grid (every ~150ms) for the 15s close-up plots, where precise
+            # sample-level alignment needs to be visually checkable
+            ax.grid(
+                True,
+                linewidth=0.5,
+                linestyle="--",
+                color="gray",
+                which="both",
+                alpha=0.5,
+            )
             ax.set_xticks(np.arange(0, plot_width, grid_width))
-            new_labels = [str(int(label) + base_offset) for label in ax.get_xticks()]
+            new_labels = [
+                format_ecog_sample_as_time(label + base_offset, ecog_begin, ecog_freq)
+                for label in ax.get_xticks()
+            ]
             ax.set_xticklabels(new_labels, fontsize=4, rotation=90)
 
+        def set_wall_time_axis(ax, base_offset):
+            # coarser plots (multi-minute / whole-recording) let matplotlib auto-pick tick
+            # positions; we just reformat whatever ticks it picks as wall-clock time
+            ax.xaxis.set_major_formatter(
+                FuncFormatter(
+                    lambda x, pos: format_ecog_sample_as_time(
+                        x + base_offset, ecog_begin, ecog_freq
+                    )
+                )
+            )
+            ax.grid(
+                True,
+                linewidth=0.5,
+                linestyle="--",
+                color="gray",
+                which="both",
+                alpha=0.5,
+            )
+            plt.setp(ax.get_xticklabels(), rotation=45, ha="right", fontsize=6)
+
         # --- Close-up at the start of the overlap -------------------------------------
-        around = PLOT_AROUND_SAMPLES
+        around = int(15 * ecog_freq)  # 15 seconds worth of samples at the ecog's rate
         around = min(around, plot_lag, len(sig_a) - plot_lag, len(sig_b))
 
         fig, ax = plt.subplots(figsize=(15, 5), dpi=200)
-        plot_close_up_window(ax, sig_a, sig_b, plot_lag, color_a, color_b, label_a, label_b, around, end=False)
+        plot_close_up_window(
+            ax,
+            sig_a,
+            sig_b,
+            plot_lag,
+            color_a,
+            color_b,
+            label_a,
+            label_b,
+            around,
+            ecog_freq,
+            end=False,
+        )
         add_time_grid(ax, 2 * around, plot_lag - around)
         ax.legend()
         plt.savefig(out_path("beginning"))
         plt.close(fig)
 
         # --- Close-up at the end of the overlap -----------------------------------------
-        around_end = PLOT_AROUND_SAMPLES
+        around_end = int(15 * ecog_freq)
         around_end = min(around_end, overlap_end, len(sig_a) - overlap_end, overlap_len)
 
         fig, ax = plt.subplots(figsize=(15, 5), dpi=200)
-        plot_close_up_window(ax, sig_a, sig_b_overlap, overlap_end, color_a, color_b, label_a, label_b, around_end, end=True)
+        plot_close_up_window(
+            ax,
+            sig_a,
+            sig_b_overlap,
+            overlap_end,
+            color_a,
+            color_b,
+            label_a,
+            label_b,
+            around_end,
+            ecog_freq,
+            end=True,
+        )
         add_time_grid(ax, 2 * around_end, overlap_end - around_end)
         ax.legend()
         plt.savefig(out_path("ending"))
         plt.close(fig)
 
         # --- First 2 minutes of the overlap ----------------------------------------------
-        length = min(int(120 * ECOG_FREQ), len(sig_b), len(sig_a) - plot_lag)
+        length = min(int(120 * ecog_freq), len(sig_b), len(sig_a) - plot_lag)
 
         fig, ax = plt.subplots(figsize=(15, 5), dpi=200)
-        plot_extended_window(ax, sig_a, sig_b, plot_lag, color_a, color_b, label_a, label_b, length, end=False)
+        plot_extended_window(
+            ax,
+            sig_a,
+            sig_b,
+            plot_lag,
+            color_a,
+            color_b,
+            label_a,
+            label_b,
+            length,
+            ecog_freq,
+            end=False,
+        )
+        set_wall_time_axis(ax, plot_lag)
         ax.legend()
         plt.savefig(out_path("two_mins"))
         plt.close(fig)
 
         # --- Last 2 minutes of the overlap -----------------------------------------------
-        length_end = min(int(120 * ECOG_FREQ), overlap_len, overlap_end)
+        length_end = min(int(120 * ecog_freq), overlap_len, overlap_end)
 
         fig, ax = plt.subplots(figsize=(15, 5), dpi=200)
-        plot_extended_window(ax, sig_a, sig_b_overlap, overlap_end, color_a, color_b, label_a, label_b, length_end, end=True)
+        plot_extended_window(
+            ax,
+            sig_a,
+            sig_b_overlap,
+            overlap_end,
+            color_a,
+            color_b,
+            label_a,
+            label_b,
+            length_end,
+            ecog_freq,
+            end=True,
+        )
+        set_wall_time_axis(ax, overlap_end - length_end)
         ax.legend()
         plt.savefig(out_path("last_two_mins"))
         plt.close(fig)
@@ -224,24 +418,59 @@ class LedSynchronizer:
             ecog_sig, ecog_offset, ecog_color, ecog_label = sig_a, 0, color_a, label_a
             video_sig, video_offset, video_color, video_label = sig_b, plot_lag, color_b, label_b
 
-        ax.plot(np.arange(len(video_sig)) + video_offset, video_sig, color=video_color, label=video_label, alpha=0.5)
-        plot_with_used_window(ax, ecog_sig, ecog_offset, window_start, window_end, color=ecog_color, label=ecog_label)
-        ax.plot(np.arange(int(ECOG_FREQ)), np.zeros((int(ECOG_FREQ),)), color="black", label="1s stretch", linewidth=2)
+        ax.plot(
+            np.arange(len(video_sig)) + video_offset,
+            video_sig,
+            color=video_color,
+            label=video_label,
+            alpha=0.5,
+        )
+        plot_with_used_window(
+            ax,
+            ecog_sig,
+            ecog_offset,
+            window_start,
+            window_end,
+            color=ecog_color,
+            label=ecog_label,
+        )
+        ax.plot(
+            np.arange(int(ecog_freq)),
+            np.zeros((int(ecog_freq),)),
+            color="black",
+            label="1s stretch",
+            linewidth=2,
+        )
+        set_wall_time_axis(ax, 0)
 
         ax.legend()
         plt.savefig(out_path("whole"))
         plt.close(fig)
 
         # --- Correlation plot ----------------------------------------------------------
-        fig = plt.figure()
-        plt.plot(np.arange(window_start, window_start + len(best_corr_array)), best_corr_array)
+        fig, ax = plt.subplots()
+        ax.plot(
+            np.arange(window_start, window_start + len(best_corr_array)),
+            best_corr_array,
+        )
+        set_wall_time_axis(ax, 0)
         plt.savefig(out_path("corr"))
         plt.close(fig)
 
-    def sync_and_optimize_freq(self, ecog_signal, video_signal, video_duration, original_video_basename=None, ecog_basename=None, expected_lag_seconds=None):
+    def sync_and_optimize_freq(
+        self,
+        ecog_signal,
+        video_signal,
+        video_duration,
+        original_video_basename=None,
+        ecog_basename=None,
+        expected_lag_seconds=None,
+        *,
+        ecog_freq,
+        ecog_begin=None,
+    ):
         # trying different frequencies as ecog and realsense are both imprecise in their sampling
         # frequencies so I adjust it like this - we find the freq that gets the best result :)
-        ecog_freq = ECOG_FREQ
         video_freq = len(video_signal) / video_duration
 
         # upsample the video to the ecog frequency
@@ -284,9 +513,24 @@ class LedSynchronizer:
                 best_corr_array = corr_array
 
         if self.sync_images_folder is not None and original_video_basename is not None:
-            self.save_sync_plots(ecog_signal, best_signal, best_lag, window_start, window_end, best_corr_array, original_video_basename, ecog_basename)
+            self.save_sync_plots(
+                ecog_signal,
+                best_signal,
+                best_lag,
+                window_start,
+                window_end,
+                best_corr_array,
+                original_video_basename,
+                ecog_basename,
+                ecog_freq,
+                ecog_begin,
+            )
 
-        peaks, _ = find_peaks(best_corr_array, height=0.5 * np.max(best_corr_array), distance=int(ECOG_FREQ) * 2)  # TODO: fix distance by the freq
+        peaks, _ = find_peaks(
+            best_corr_array,
+            height=0.5 * np.max(best_corr_array),
+            distance=int(ecog_freq) * 2,
+        )  # TODO: fix distance by the freq
         second_largest_corr_peak = 0
         if len(peaks) < 2:
             second_largest_corr_peak = 0
@@ -297,13 +541,23 @@ class LedSynchronizer:
 
         return best_corr, best_lag, best_n_samples, len(peaks), second_largest_corr_peak
 
-    def sync_with_led(self, video_fullpath, led_signal_full_path, ecog_file, log=True, output_path_manual=None):
-        ecog_signal, ecog_duration = get_LED_from_nwb(ecog_file)
+    def sync_with_led(
+        self,
+        video_fullpath,
+        led_signal_full_path,
+        ecog_file,
+        log=True,
+        output_path_manual=None,
+    ):
+        ecog_signal, _ = get_LED_from_nwb(ecog_file)
+        ecog_freq = get_ecog_freq_from_nwb(ecog_file)
         try:
-            ecog_begin, _ = get_begin_and_duration_nwb(ecog_file)
+            ecog_begin, ecog_duration = get_begin_and_duration_nwb(ecog_file)
         except Exception:
-            ecog_begin = None
-            tqdm.write(f"Could not read session_start_time from {ecog_file}, will fall back to full-signal search.")
+            ecog_begin, ecog_duration = None, None
+            tqdm.write(
+                f"Could not read session_start_time from {ecog_file}, will fall back to full-signal search."
+            )
 
         video_led = np.load(led_signal_full_path)
         original_num_frames_video = len(video_led)  # frame count before any resampling -- needed downstream to map ECoG samples <-> video frames
@@ -344,9 +598,26 @@ class LedSynchronizer:
         video_led = robust_zscore(video_led)
         ecog_signal = robust_zscore(ecog_signal)
 
-        if video_duration > 15: # process videos that are at least 15s long
-            best_corr, best_lag, best_n_samples, best_total_peaks, best_second_largest_corr_peak = self.sync_and_optimize_freq(ecog_signal, video_led, video_duration, video_basename, ecog_basename, expected_lag_seconds=expected_lag_seconds)
-            tqdm.write(f"  -> corr={best_corr:.1f}  lag={best_lag} ({best_lag / ECOG_FREQ:.2f}s)")
+        if video_duration > 15:  # process videos that are at least 15s long
+            (
+                best_corr,
+                best_lag,
+                best_n_samples,
+                best_total_peaks,
+                best_second_largest_corr_peak,
+            ) = self.sync_and_optimize_freq(
+                ecog_signal,
+                video_led,
+                video_duration,
+                video_basename,
+                ecog_basename,
+                expected_lag_seconds=expected_lag_seconds,
+                ecog_freq=ecog_freq,
+                ecog_begin=ecog_begin,
+            )
+            tqdm.write(
+                f"  -> corr={best_corr:.1f}  lag={best_lag} ({best_lag / ecog_freq:.2f}s)"
+            )
             sync_failed = 0
 
         else:
@@ -356,21 +627,50 @@ class LedSynchronizer:
             self.log.update_log(video_basename, 'video_duration', video_duration)
             self.log.update_log(video_basename, 'sync_error_msg', "Video too short (under 15s).")
 
+        slope, intercept = fit_video_to_ecog_time(
+            ecog_begin=ecog_begin,
+            video_begin=video_begin,
+            video_duration=video_duration,
+            ecog_freq=ecog_freq,
+            lag=best_lag,
+            best_n_samples=best_n_samples,
+            sync_failed=sync_failed,
+        )
 
         if log:
-            self.log.update_log(video_basename, 'video_duration', video_duration)
-            self.log.update_log(video_basename, 'original_num_frames_video', original_num_frames_video)
-            self.log.update_log(video_basename, 'best_resampled_video_num_frames', int(best_n_samples))
-            self.log.update_log(video_basename, 'path_ecog', ecog_file)
-            self.log.update_log(video_basename, 'corr', best_corr)
-            self.log.update_log(video_basename, 'lag', best_lag)
-            self.log.update_log(video_basename, 'expected_lag_seconds', expected_lag_seconds)
-            self.log.update_log(video_basename, 'sync_failed', sync_failed)
-            self.log.update_log(video_basename, 'additional_peaks_per_million', (best_total_peaks-1)/len(ecog_signal) * 1000000)
-            self.log.update_log(video_basename, 'best_second_largest_corr_peak', best_second_largest_corr_peak)
+            self.log.update_log(video_basename, "video_duration", video_duration)
+            self.log.update_log(video_basename, "video_timestamp", video_begin)
+            self.log.update_log(video_basename, "ecog_timestamp", ecog_begin)
+            self.log.update_log(video_basename, "ecog_duration", ecog_duration)
+            self.log.update_log(video_basename, "ecog_frequency", ecog_freq)
+            self.log.update_log(
+                video_basename, "original_num_frames_video", original_num_frames_video
+            )
+            self.log.update_log(
+                video_basename, "best_resampled_video_num_frames", int(best_n_samples)
+            )
+            self.log.update_log(video_basename, "path_ecog", ecog_file)
+            self.log.update_log(video_basename, "corr", best_corr)
+            self.log.update_log(video_basename, "lag", best_lag)
+            self.log.update_log(
+                video_basename, "expected_lag_seconds", expected_lag_seconds
+            )
+            self.log.update_log(video_basename, "sync_failed", sync_failed)
+            self.log.update_log(
+                video_basename,
+                "additional_peaks_per_million",
+                (best_total_peaks - 1) / len(ecog_signal) * 1000000,
+            )
+            self.log.update_log(
+                video_basename,
+                "best_second_largest_corr_peak",
+                best_second_largest_corr_peak,
+            )
+            self.log.update_log(video_basename, "slope", slope)
+            self.log.update_log(video_basename, "intercept", intercept)
         else:
             # write the logs into a file logs_manual.txt in the output_path_manual (but if the file exists, append to it)
-            with open(os.path.join(output_path_manual, 'logs_manual.txt'), 'a') as f:
+            with open(os.path.join(output_path_manual, "logs_manual.txt"), "a") as f:
                 f.write(f"Path to the best ecog file: {ecog_file}\n")
                 f.write(f"Normalized correlation: {best_corr}\n")
                 f.write(f"Lag: {best_lag}\n")
@@ -443,7 +743,16 @@ class LedSynchronizer:
             plt.plot(np.abs(correlation))
             plt.show()
 
-            plt.plot(np.abs(correlation[np.argmax(np.abs(correlation))-600:np.argmax(np.abs(correlation))+600]))
+            plt.plot(
+                np.abs(
+                    correlation[
+                        np.argmax(np.abs(correlation)) - 600 : np.argmax(
+                            np.abs(correlation)
+                        )
+                        + 600
+                    ]
+                )
+            )
             plt.title("Peak close-up")
             plt.show()
 
@@ -463,8 +772,7 @@ class LedSynchronizer:
         return np.max(np.abs(correlation)), lag, np.abs(correlation)
 
 
-if __name__=="__main__":
-
+if __name__ == "__main__":
     visualize = False
 
     parser = argparse.ArgumentParser(description="Synchronize ECoG and Video data using the LED signals.")
@@ -483,7 +791,14 @@ if __name__=="__main__":
 
     mem_bar = tqdm(total=0, position=1, bar_format="{desc}", leave=True)
 
-    synchronizer = LedSynchronizer(args.video_folder, args.led_signals_folder, args.ecog_folder, args.log_table_path, args.sync_images_path, visualize)
+    synchronizer = LedSynchronizer(
+        args.video_folder,
+        args.led_signals_folder,
+        args.ecog_folder,
+        args.log_table_path,
+        args.sync_images_path,
+        visualize,
+    )
     synchronizer.sync_video_folder(args.extension)
 
     mem_bar.close()
