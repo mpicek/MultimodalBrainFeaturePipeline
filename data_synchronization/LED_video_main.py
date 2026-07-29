@@ -97,14 +97,19 @@ def get_single_frame_for_led_cropping(video_path, skip_frames=30):
 
     Returns:
         ref_point: the two (x, y) corners of the selected ROI, as returned by ImageCropper.
-                   None if the video couldn't be opened or no frame could be read.
+                   None if the user marked the video as having no LED (pressed 'n').
         cropped_LED_image_colorful: the cropped ROI from that one frame, all channels (shape
-                   (height, width, 3)). None on failure.
+                   (height, width, 3)). None in the same "no LED" case.
+
+    Raises:
+        RuntimeError: if the video can't be opened or no frame can be read. This is deliberately
+                   NOT reported as "no LED": such a failure is often transient (an unmounted
+                   network drive), so the caller should leave the video unlabeled and re-offer it
+                   on the next run rather than recording a permanent verdict about it.
     """
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
-        print("Error: Could not open video.")
-        return None, None
+        raise RuntimeError(f"Could not open video: {video_path}")
 
     num_of_frames_of_the_video = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     start_frame = skip_frames if num_of_frames_of_the_video > skip_frames else 0
@@ -113,8 +118,7 @@ def get_single_frame_for_led_cropping(video_path, skip_frames=30):
     ret, frame = cap.read()
     cap.release()
     if not ret:
-        print(f"Error: Could not read frame {start_frame} from {video_path}.")
-        return None, None
+        raise RuntimeError(f"Could not read frame {start_frame} from {video_path}")
 
     cropper = ImageCropper(frame)
     cropped_LED_image_colorful, ref_point = cropper.show_and_crop_image()

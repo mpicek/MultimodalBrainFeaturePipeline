@@ -5,6 +5,7 @@ from scipy.ndimage import gaussian_filter
 def smooth(y, box_pts):
     return gaussian_filter(y, box_pts)
 from LED_video_main import get_single_frame_for_led_cropping
+from LED_utils import LED_ERROR_NO_LED, save_LED_error
 
 DOWNSCALE_FACTOR = 2
 FRAMES_TO_SKIP_AT_START = 100  # skip the first few frames, which are often under-exposed/unstable
@@ -37,14 +38,25 @@ def extract_led_position_folder(video_folder, output_folder, downscale_factor, e
                         skip_frames=FRAMES_TO_SKIP_AT_START,
                     )
 
-                mask_shape = cropped_LED_image_colorful[..., 2][::downscale_factor, ::downscale_factor].shape
-                binary_mask = np.full(mask_shape, True)
-
                 video_basename = os.path.splitext(os.path.basename(path_video))[0]
-                np.save(os.path.join(output_folder, video_basename + "_LED_position.npy"),ref_point,)
-                np.save(os.path.join(output_folder, video_basename + '_LED_binary_mask.npy'),binary_mask,)
-            except Exception:
-                print(f"Error with file {path_video}")
+                position_path = os.path.join(output_folder, video_basename + "_LED_position.npy")
+                binary_mask_path = os.path.join(output_folder, video_basename + '_LED_binary_mask.npy')
+
+                if ref_point is None:
+                    # the user pressed 'n' -- record that this video has no LED, so that it isn't
+                    # offered for labeling again on every subsequent run of this script
+                    print(f"  -> {LED_ERROR_NO_LED}")
+                    save_LED_error(position_path, LED_ERROR_NO_LED)
+                    save_LED_error(binary_mask_path, LED_ERROR_NO_LED)
+                else:
+                    mask_shape = cropped_LED_image_colorful[..., 2][::downscale_factor, ::downscale_factor].shape
+                    binary_mask = np.full(mask_shape, True)
+
+                    np.save(position_path, ref_point,)
+                    np.save(binary_mask_path, binary_mask,)
+            except Exception as e:
+                # nothing is written, so the video stays unlabeled and gets re-offered next run
+                print(f"Error with file {path_video}: {e}")
 
 
 def main(video_folder, output_folder, extension):

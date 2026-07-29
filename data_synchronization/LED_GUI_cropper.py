@@ -3,6 +3,8 @@ from skimage import io, filters, measure, color, morphology
 import cv2
 import matplotlib.pyplot as plt
 
+WINDOW_TITLE = "Select the LED and press 'c'  |  'n' = no LED in this video  |  'r' = reset"
+
 class ImageCropper:
     def __init__(self, image_array):
         """
@@ -15,6 +17,7 @@ class ImageCropper:
         self.clone = image_array.copy()
         self.ref_point = []  # To store rectangle coordinates
         self.cropping = False  # Flag to indicate that cropping is being performed
+        self.led_absent = False  # Set when the user presses 'n' to say this video has no LED
 
     def click_and_crop(self, event, x, y, flags, param):
         """
@@ -52,42 +55,53 @@ class ImageCropper:
 
             # Draw a rectangle around the region of interest
             cv2.rectangle(self.image, self.ref_point[0], self.ref_point[1], (0, 255, 0), 1)
-            cv2.imshow("Select area and press 'c' to continue (or 'r' to reset the area)", self.image)
+            cv2.imshow(WINDOW_TITLE, self.image)
 
     def show_and_crop_image(self):
         """
         Display the image and allow the user to select a region to crop. The method captures
         mouse events to define the corners of the rectangle. The user can reset the selection
-        by pressing 'r' and confirm the selection by pressing 'c'.
+        by pressing 'r' and confirm the selection by pressing 'c'. 'c' only works once an area
+        has actually been selected -- a video with no LED must be marked with 'n' instead, so
+        that "no LED here" gets recorded rather than silently skipped.
 
         Returns:
-        tuple: A tuple of (cropped_image (numpy array), list of reference points defining the selected rectangle).
-               If no selection is made, returns None.
+        tuple: (cropped_image (numpy array), list of reference points defining the selected
+               rectangle), or (None, None) if the user pressed 'n' to say the video has no LED.
         """
-        cv2.namedWindow("Select area and press 'c' to continue (or 'r' to reset the area)")
-        cv2.setMouseCallback("Select area and press 'c' to continue (or 'r' to reset the area)", self.click_and_crop)
+        cv2.namedWindow(WINDOW_TITLE)
+        cv2.setMouseCallback(WINDOW_TITLE, self.click_and_crop)
 
-        print("Select area and press 'c' to continue (or 'r' to reset the area)")
-        # Keep looping until the 'q' key is pressed
+        print(WINDOW_TITLE)
         while True:
             # Display the image and wait for a keypress
-            cv2.imshow("Select area and press 'c' to continue (or 'r' to reset the area)", self.image)
+            cv2.imshow(WINDOW_TITLE, self.image)
             key = cv2.waitKey(1) & 0xFF
 
-            # If the 'r' key is pressed, reset the cropping region
+            # If the 'r' key is pressed, reset the cropping region. ref_point has to be cleared
+            # too, otherwise 'r' followed by 'c' would confirm the box from before the reset.
             if key == ord("r"):
                 self.image = self.clone.copy()
+                self.ref_point = []
 
-            # If the 'c' key is pressed, break from the loop
+            # If the 'c' key is pressed, break from the loop -- but only with an actual selection
             elif key == ord("c"):
+                if len(self.ref_point) == 2:
+                    break
+                print("No area selected -- drag a rectangle around the LED, or press 'n' if this video has no LED.")
+
+            # If the 'n' key is pressed, the video has no LED at all
+            elif key == ord("n"):
+                self.led_absent = True
                 break
 
         cv2.destroyAllWindows()
 
-        # If there are two reference points, then crop the region of interest from the image
-        if len(self.ref_point) == 2:
-            roi = self.clone[self.ref_point[0][1]:self.ref_point[1][1], self.ref_point[0][0]:self.ref_point[1][0]]
-            return roi, self.ref_point
+        if self.led_absent:
+            return None, None
+
+        roi = self.clone[self.ref_point[0][1]:self.ref_point[1][1], self.ref_point[0][0]:self.ref_point[1][0]]
+        return roi, self.ref_point
 
 if __name__ == "__main__":
     # Example usage

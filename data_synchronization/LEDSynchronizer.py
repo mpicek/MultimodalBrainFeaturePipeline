@@ -8,6 +8,7 @@ from matplotlib.ticker import FuncFormatter
 from scipy import signal
 from scipy.signal import find_peaks
 from SyncLogger import SyncLogger, FileAlreadySynchronized
+from LED_utils import load_LED_array
 from wisci_utils import (
     get_LED_from_nwb,
     get_ecog_freq_from_nwb,
@@ -549,6 +550,13 @@ class LedSynchronizer:
         log=True,
         output_path_manual=None,
     ):
+        # checked first, before any (expensive) ecog reading: a marker file means labeling already
+        # established this video has no usable LED. sync_video_folder normally catches this before
+        # calling us at all -- this guards direct calls to sync_with_led.
+        video_led, led_error = load_LED_array(led_signal_full_path)
+        if led_error is not None:
+            raise RuntimeError(led_error)
+
         ecog_signal, _ = get_LED_from_nwb(ecog_file)
         ecog_freq = get_ecog_freq_from_nwb(ecog_file)
         try:
@@ -559,7 +567,6 @@ class LedSynchronizer:
                 f"Could not read session_start_time from {ecog_file}, will fall back to full-signal search."
             )
 
-        video_led = np.load(led_signal_full_path)
         original_num_frames_video = len(video_led)  # frame count before any resampling -- needed downstream to map ECoG samples <-> video frames
         video_basename = os.path.basename(video_fullpath)
         ecog_basename = os.path.basename(str(Path(ecog_file).parent))
@@ -704,6 +711,19 @@ class LedSynchronizer:
                 continue
 
             video_basename_noext = os.path.splitext(video_basename)[0]
+            led_signal_full_path = os.path.join(self.led_signals_folder, video_basename_noext + "_LED_signal.npy")
+
+            # a marker file means labeling already established this video has no usable LED --
+            # record the reason and move on without searching for (or opening) any ecog file
+            if os.path.exists(led_signal_full_path):
+                _, led_error = load_LED_array(led_signal_full_path)
+                if led_error is not None:
+                    tqdm.write(f"  -> {led_error}. Skipping synchronization.")
+                    self.log.update_log(video_basename, "sync_error_msg", led_error)
+                    self.log.update_log(video_basename, "sync_failed", 1)
+                    self.log.save_to_csv()  # the ecog loop's finally: below is what normally saves
+                    continue
+
             try:
                 ecog_files = find_corresponding_nwbs(video_path, self.video_folder, self.ecog_server_path)
             except Exception:
@@ -721,7 +741,7 @@ class LedSynchronizer:
                 try:
                     self.sync_with_led(
                         video_path,
-                        os.path.join(self.led_signals_folder, video_basename_noext + "_LED_signal.npy"),
+                        led_signal_full_path,
                         ecog_file,
                     )
                 except Exception:

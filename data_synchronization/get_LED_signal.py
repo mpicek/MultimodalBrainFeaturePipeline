@@ -4,7 +4,7 @@ import argparse
 from scipy.ndimage import gaussian_filter
 def smooth(y, box_pts):
     return gaussian_filter(y, box_pts)
-from LED_utils import get_LED_signal_from_video
+from LED_utils import get_LED_signal_from_video, load_LED_array, save_LED_error
 
 N_FRAMES_TO_COMPUTE_LED_STD_FROM = 9999999999999999999 # only 40 needed because we are only interested in the position of the LED, not the signal itself
 DOWNSCALE_FACTOR = 2
@@ -48,12 +48,24 @@ def video_folder_get_LED(video_folder, led_position_folder, output_folder, exten
             video_count += 1
             print(f"Processing video {video_count}: {path_video}")
             try:
-                led_position = np.load(led_position_path)
-                binary_mask = np.load(binary_mask_path)
+                led_signal_path = os.path.join(output_folder, video_basename + '_LED_signal.npy')
+
+                led_position, position_error = load_LED_array(led_position_path)
+                binary_mask, mask_error = load_LED_array(binary_mask_path)
+
+                led_error = position_error or mask_error
+                if led_error is not None:
+                    # labeling already established there is no usable LED here -- carry the reason
+                    # over to the signal file so the synchronizer can report it (and so this video
+                    # isn't reprocessed on the next run)
+                    print(f"  -> {led_error}")
+                    save_LED_error(led_signal_path, led_error)
+                    continue
+
                 led_signal = get_LED_signal(path_video, led_position, binary_mask)
-                np.save(os.path.join(output_folder, video_basename + '_LED_signal.npy'), led_signal)
-            except Exception:
-                print(f"Error with file {path_video}")
+                np.save(led_signal_path, led_signal)
+            except Exception as e:
+                print(f"Error with file {path_video}: {e}")
 
 
 def main(video_folder, led_position_folder, output_folder, extension):

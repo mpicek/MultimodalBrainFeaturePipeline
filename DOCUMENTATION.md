@@ -29,7 +29,15 @@ Into `mp4` folder. Skips already analyzed videos in that folder
 ### 2. Option 2: Movement Synchronization using LED Synchronization
 
 #### 2a. Extract LED positions from the videos (extract_LED_position.py)
-- Select area and press 'c' to continue (or 'r' to reset the area).
+- Select the area around the LED and press 'c' to continue (or 'r' to reset the area).
+- 'c' only works once an area is selected. If the video has no LED at all, press 'n' instead.
+  That records "no LED" in the `_LED_position.npy` / `_LED_binary_mask.npy` files (as the string
+  `"Error: No LED present in the video"` instead of an array), so the video is not offered for
+  labeling again on the next run. `get_LED_signal.py` carries the same marker over to
+  `_LED_signal.npy`, and `LEDSynchronizer.py` logs it as `sync_failed=1` with that message in
+  `sync_error_msg`.
+- Videos that cannot be opened at all are deliberately *not* marked -- they stay unlabeled and are
+  re-offered on the next run, since such failures are often just an unmounted drive.
 
 #### 2b. Extract LED signal from the .mp4 videos (get_LED_signal.py)
 

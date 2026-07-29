@@ -4,6 +4,29 @@ from scipy import signal
 import matplotlib.pyplot as plt
 import cv2
 
+LED_ERROR_NO_LED = "Error: No LED present in the video"
+
+
+def save_LED_error(path, message):
+    """Write an error marker into an LED .npy file in place of real data."""
+    np.save(path, message)
+
+
+def load_LED_array(path):
+    """
+    Load a _LED_position / _LED_binary_mask / _LED_signal .npy file.
+
+    Returns (array, error_message); exactly one of the two is None. Real LED arrays are always
+    numeric/bool, so a unicode dtype unambiguously means the file holds an error marker instead
+    of data. The marker is stored as a plain string rather than None so these files still load
+    with a bare np.load() -- an object array would require allow_pickle=True at every reader.
+    """
+    arr = np.load(path)
+    if arr.dtype.kind == "U":
+        return None, str(arr)
+    return arr, None
+
+
 def get_LED_mask(video_array, visualize_pipeline=False, cropped_LED_image_colorful=None, save_vizualization_to=None):
     """
     Generates a mask for LED region in a video based on frame variability.
