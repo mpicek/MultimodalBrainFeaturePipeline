@@ -42,7 +42,7 @@ cd "$REPO_DIR"
 echo "Job started: $(date)"
 echo "Node: $(hostname)"
 
-python LEDSynchronizer.py \
+python -u LEDSynchronizer.py \
     "$VIDEO_FOLDER" \
     "$LED_SIGNALS_FOLDER" \
     "$ECOG_FOLDER" \

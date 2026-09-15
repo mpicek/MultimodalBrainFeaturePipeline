@@ -40,7 +40,7 @@ cd "$REPO_DIR"
 echo "Job started: $(date)"
 echo "Node: $(hostname)"
 
-python get_LED_signal.py \
+python -u get_LED_signal.py \
     "$VIDEO_FOLDER" \
     "$LED_POSITION_FOLDER" \
     "$EXTENSION" \
