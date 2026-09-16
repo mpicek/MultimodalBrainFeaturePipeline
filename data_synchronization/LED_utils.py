@@ -257,3 +257,45 @@ def compute_offset(realsense_LED_signal, camera_LED_signal):
 
     return lag
 
+
+
+def resolve_sessions(identifiers):
+    """
+    The sessions named by the identifiers, de-duplicated; all of them when none is given.
+
+    An identifier is a trial ("UP2"), a patient ("UP2004") or a single session name, so several
+    of them can be mixed freely; the first occurrence of a session wins.
+
+    nr-data is imported here rather than at module level on purpose: the scripts that predate it
+    (get_LED_signal.py, LEDSynchronizer.py and the slurm jobs around them) import this module in
+    an environment built from requirements.txt, where nr_data isn't installed.
+    """
+    from nr_data.trial_config.trial_setup import list_all_sessions, list_sessions_for_identifier
+
+    if not identifiers:
+        return list_all_sessions()
+
+    sessions = []
+    seen = set()
+    for identifier in identifiers:
+        for session in list_sessions_for_identifier(identifier):
+            if session not in seen:
+                seen.add(session)
+                sessions.append(session)
+    return sessions
+
+
+def led_annotation_folder(session, folder_name, create=False):
+    """
+    The session's <01_ANNOTATION>/<subject>/<session>/<folder_name> folder.
+
+    nr-data is imported lazily for the same reason as in resolve_sessions().
+    """
+    from nr_data.layout.data_layout import SessionLayout
+    from nr_data.trial_config.TrialConfig import DataRootType
+
+    layout = SessionLayout.from_trial_session(session, root_data_type=DataRootType.ANNOTATION)
+    folder = layout.session_folder / folder_name
+    if create:
+        folder.mkdir(parents=True, exist_ok=True)
+    return folder
