@@ -36,11 +36,10 @@ from nr_data.trial_config.TrialSession import TrialSession
 from nr_data.utils import duration_s_expr
 from nr_data.video.video_utils import find_video_recordings
 
-from LED_utils import led_annotation_folder, load_LED_array, resolve_sessions
+from LED_utils import LED_ERROR_UNREADABLE, led_annotation_folder, load_LED_array, resolve_sessions
 
 DOWNSCALE_FACTOR = 2
 LED_POSITION_FOLDER_NAME = "led_position"
-LED_SIGNAL_FOLDER_NAME = "led_signal"
 SKIPPED_FILENAME = "skipped_LED.json"
 SCRIPT_NAME = "get_LED_signal_nr_data"
 
@@ -48,6 +47,7 @@ SCRIPT_NAME = "get_LED_signal_nr_data"
 NO_VIDEO = "no video file"
 NOT_LABELED = "no LED position/mask"
 NO_LED = "annotated as having no LED"
+UNREADABLE = "annotated as undecodable video"
 FAILED = "extraction failed"
 
 
@@ -84,18 +84,6 @@ def extract_trace(video_path, led_position, binary_mask):
     return np.array(pts_s, dtype=np.float64), np.array(intensity, dtype=np.float64)
 
 
-def load_cached_trace(trace_path):
-    """(pts_s, intensity) from a cached trace, or None when there is nothing usable to reuse."""
-    if not trace_path.exists():
-        return None
-
-    cached, error = load_LED_array(trace_path)
-    if error is not None or cached.ndim != 2 or cached.shape[1] != 2:
-        # an error marker, or an intensity-only array from before pts was recorded
-        return None
-    return cached[:, 0], cached[:, 1]
-
-
 def trace_frame(clock, pts_s, intensity):
     """One recording's trace in the Table contract: timestamp (pts) | clock | led_intensity."""
     return pl.DataFrame({"pts_s": pts_s, "led_intensity": intensity}).select(
@@ -103,6 +91,12 @@ def trace_frame(clock, pts_s, intensity):
         pl.lit(clock).alias("clock"),
         pl.col("led_intensity").cast(pl.Float64),
     )
+
+
+def empty_trace_frame():
+    """A zero-row frame with exactly the schema trace_frame produces."""
+    empty = np.array([], dtype=np.float64)
+    return trace_frame("", empty, empty)
 
 
 def session_is_completed(session):
@@ -114,9 +108,9 @@ def session_is_completed(session):
         return False
 
 
-def recording_plan(session, dry_run=False):
+def recording_plan(session):
     """
-    What each of the session's recordings needs: (meta, trace_path, led_position, binary_mask).
+    What each of the session's recordings needs: (meta, led_position, binary_mask).
 
     Recordings that cannot produce rows are returned as skip entries instead, each with its reason.
     The no-LED verdict is read here, before any run folder exists, so that a session where every
@@ -124,7 +118,6 @@ def recording_plan(session, dry_run=False):
     failed extraction.
     """
     led_position_folder = led_annotation_folder(session, LED_POSITION_FOLDER_NAME)
-    led_signal_folder = led_annotation_folder(session, LED_SIGNAL_FOLDER_NAME, create=not dry_run)
 
     todo = []
     skipped = []
@@ -152,11 +145,11 @@ def recording_plan(session, dry_run=False):
         if led_error is not None:
             # labeling already established there is no usable LED here: no rows, and the verdict
             # stays where it was made, in led_position/
-            skipped.append({**entry, "reason": NO_LED, "detail": led_error})
+            reason = UNREADABLE if led_error == LED_ERROR_UNREADABLE else NO_LED
+            skipped.append({**entry, "reason": reason, "detail": led_error})
             continue
 
-        trace_path = led_signal_folder / f"{meta.video_pts_clock_id}_LED_trace.npy"
-        todo.append((meta, trace_path, led_position, binary_mask))
+        todo.append((meta, led_position, binary_mask))
 
     return todo, skipped
 
@@ -172,27 +165,24 @@ def extract_session(session, dry_run=False, force=False):
         print("  Already has a completed LED run. Skipping (use --force to re-run).")
         return 0, 0, True
 
-    todo, skipped = recording_plan(session, dry_run=dry_run)
+    todo, skipped = recording_plan(session)
     for entry in skipped:
         print(f"  {entry['clock']}: {entry['reason']}. Skipping.")
 
     if dry_run:
-        for meta, trace_path, _, _ in todo:
-            source = "cached trace" if load_cached_trace(trace_path) is not None else "decode"
-            print(f"  would measure {meta.video_pts_clock_id} ({source})")
+        for meta, _, _ in todo:
+            print(f"  would measure {meta.video_pts_clock_id}")
         return len(todo), len(todo), False
 
-    if not todo:
-        # Nothing here can produce a trace - every recording is unlabeled, annotated as having no
-        # LED, or has no video. That is a legitimate end state for a session, not a failed run, so
-        # no run folder is created and nothing is marked as an error.
-        print("  Nothing to measure (no labeled recording with an LED). Skipping session.")
+    # Recordings with no video file can never be annotated, so they are exempt from the gate
+    # below; a session made up entirely of them has no camera data to judge at all.
+    if not todo and all(entry["reason"] == NO_VIDEO for entry in skipped):
+        print("  No video recordings to measure. Skipping session.")
         return 0, 0, False
 
     config = {
         "downscale_factor": DOWNSCALE_FACTOR,
         "led_position_folder": LED_POSITION_FOLDER_NAME,
-        "led_signal_cache_folder": LED_SIGNAL_FOLDER_NAME,
         "force": force,
     }
     # Created before extraction starts, so its provenance reflects when the work began.
@@ -204,19 +194,23 @@ def extract_session(session, dry_run=False, force=False):
         interrupted_content=f"Interrupted while extracting LED signals for {session.session}.",
         logger_name=SCRIPT_NAME,
     ) as run:
+        # Labeling comes first: a session that is not fully annotated is not ready to measure,
+        # and half of it measured now would be indistinguishable from all of it measured later.
+        unlabeled = [entry for entry in skipped if entry["reason"] == NOT_LABELED]
+        if unlabeled:
+            run_folder.write_json(SKIPPED_FILENAME, {"session": session.session, "skipped": skipped}, indent=4)
+            raise RuntimeError(
+                f"{len(unlabeled)} recording(s) of {session.session} have no LED position/mask yet. "
+                "Run extract_LED_position_nr_data.py for this session first."
+            )
+
         traces = []
-        for meta, trace_path, led_position, binary_mask in todo:
+        for meta, led_position, binary_mask in todo:
             clock = meta.video_pts_clock_id
             try:
-                cached = load_cached_trace(trace_path)
-                if cached is not None:
-                    pts_s, intensity = cached
-                    run.log.info("%s: reusing %d cached sample(s).", clock, len(pts_s))
-                else:
-                    run.log.info("%s: decoding %s", clock, meta.video_path)
-                    pts_s, intensity = extract_trace(meta.video_path, led_position, binary_mask)
-                    np.save(trace_path, np.column_stack([pts_s, intensity]))
-                    run.log.info("%s: %d sample(s), pts %.3f-%.3f s.", clock, len(pts_s), pts_s[0], pts_s[-1])
+                run.log.info("%s: decoding %s", clock, meta.video_path)
+                pts_s, intensity = extract_trace(meta.video_path, led_position, binary_mask)
+                run.log.info("%s: %d sample(s), pts %.3f-%.3f s.", clock, len(pts_s), pts_s[0], pts_s[-1])
             except Exception as e:
                 # one unreadable video must not cost the whole session
                 run.log.warning("%s: %s. No rows written.", clock, e)
@@ -234,12 +228,19 @@ def extract_session(session, dry_run=False, force=False):
             traces.append(trace_frame(clock, pts_s, intensity))
             measured += 1
 
-        if not traces:
-            # Every recording that should have produced a trace failed to: a real error, so the
-            # run is marked failed and stays invisible to readers.
-            raise RuntimeError(f"No LED trace could be extracted for {session.session}")
-
+        # Written before the guard below: a run where everything failed is exactly the run whose
+        # per-recording reasons are worth keeping, and raising first would lose them.
         run_folder.write_json(SKIPPED_FILENAME, {"session": session.session, "skipped": skipped}, indent=4)
+
+        # A recording whose ROI was labeled had a decodable video at labeling time, so failing to
+        # decode it now is a real fault, not an expected skip. One is enough to fail the session:
+        # a parquet missing a recording nobody flagged would read as complete.
+        failures = [entry for entry in skipped if entry["reason"] == FAILED]
+        if failures:
+            raise RuntimeError(
+                f"{len(failures)} recording(s) of {session.session} could not be decoded: "
+                + ", ".join(entry["clock"] for entry in failures)
+            )
 
         # Sorted by timestamp because the reader promises polars the column is sorted
         # (session_data._load -> set_sorted); per-clock order is unaffected either way.
@@ -247,12 +248,14 @@ def extract_session(session, dry_run=False, force=False):
             session,
             LedSignalDataLayout.DATA_FOLDER_NAME,
             run_folder,
-            pl.concat(traces).sort("timestamp"),
+            pl.concat(traces).sort("timestamp") if traces else empty_trace_frame(),
             complete_run=False,
         )
 
     print(f"  Wrote {measured} trace(s) to {run_folder.path}")
-    return len(todo), measured, False
+    # Reaching here means the run was marked complete, which includes a session whose recordings
+    # are all markers: it measured nothing, but it is processed, not missing.
+    return len(todo), measured, True
 
 
 def main(identifiers, projects_folder=None, dry_run=False, force=False, raise_on_error=False):

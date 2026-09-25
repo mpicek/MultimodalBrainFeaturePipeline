@@ -22,11 +22,21 @@ from nr_data.trial_config.TrialSession import TrialSession
 from nr_data.video.video_utils import find_video_recordings
 
 from LED_GUI_cropper import ImageCropper
-from LED_utils import LED_ERROR_NO_LED, led_annotation_folder, resolve_sessions, save_LED_error
+from LED_utils import (
+    LED_ERROR_NO_LED,
+    LED_ERROR_UNREADABLE,
+    led_annotation_folder,
+    resolve_sessions,
+    save_LED_error,
+)
 
 DOWNSCALE_FACTOR = 2
 FRAMES_TO_SKIP_AT_START = 100  # skip the first few frames, which are often under-exposed/unstable
 LED_POSITION_FOLDER_NAME = "led_position"
+
+
+class UndecodableVideoError(Exception):
+    """The file is present but holds no usable video: a verdict about the footage itself."""
 
 
 def grab_frame_for_cropping(video_path, skip_frames=FRAMES_TO_SKIP_AT_START):
@@ -56,7 +66,7 @@ def grab_frame_for_cropping(video_path, skip_frames=FRAMES_TO_SKIP_AT_START):
                 first_frame = image
 
     if first_frame is None:
-        raise RuntimeError(f"Could not decode any frame from {video_path}")
+        raise UndecodableVideoError(f"Could not decode any frame from {video_path}")
     return first_frame
 
 
@@ -65,7 +75,23 @@ def label_recording(meta, led_position_folder):
     position_path = led_position_folder / f"{meta.video_pts_clock_id}_LED_position.npy"
     binary_mask_path = led_position_folder / f"{meta.video_pts_clock_id}_LED_binary_mask.npy"
 
-    frame = grab_frame_for_cropping(meta.video_path)
+    try:
+        frame = grab_frame_for_cropping(meta.video_path)
+    except (UndecodableVideoError, av.error.InvalidDataError) as e:
+        if not meta.video_path.is_file():
+            # Belt and braces: a file being deleted underneath us can surface as invalid data
+            # rather than as a missing file, and that must not become a verdict about the footage.
+            raise OSError(f"video disappeared while reading it ({meta.video_path}): {e}") from e
+
+        # The bytes themselves are not usable video. That is a property of the footage, so the
+        # verdict is final: it goes into BOTH files and the recording is never offered again.
+        print(f"  -> {LED_ERROR_UNREADABLE}: {e}")
+        save_LED_error(position_path, LED_ERROR_UNREADABLE)
+        save_LED_error(binary_mask_path, LED_ERROR_UNREADABLE)
+        return
+    # Every other failure (dropped mount, read error, permissions, GUI) says nothing about the
+    # footage, so it propagates: nothing is written and the recording is re-offered next run.
+
     cropped_LED_image_colorful, ref_point = ImageCropper(frame).show_and_crop_image()
 
     if ref_point is None:
@@ -99,9 +125,15 @@ def extract_led_position_session(session, dry_run=False):
     labeled = 0
     for meta in videos:
         position_path = led_position_folder / f"{meta.video_pts_clock_id}_LED_position.npy"
-        if position_path.exists():
+        binary_mask_path = led_position_folder / f"{meta.video_pts_clock_id}_LED_binary_mask.npy"
+        if position_path.exists() and binary_mask_path.exists():
             print(f"  {meta.video_pts_clock_id} already labeled. Skipping.")
             continue
+        elif position_path.exists() or binary_mask_path.exists():
+            # Half a pair: the two .npy are written separately, so an interrupt between them
+            # leaves one behind. get_LED_signal_nr_data.py requires both and would treat this
+            # recording as unlabeled forever, so re-offer it rather than counting it as done.
+            print(f"  {meta.video_pts_clock_id} half-labeled (position/mask incomplete). Re-labeling.")
 
         if dry_run:
             print(f"  would label {meta.video_pts_clock_id} ({meta.video_path.name})")

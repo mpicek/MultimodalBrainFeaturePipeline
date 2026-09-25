@@ -5,6 +5,10 @@ import matplotlib.pyplot as plt
 import cv2
 
 LED_ERROR_NO_LED = "Error: No LED present in the video"
+# A video that exists but cannot be decoded. Kept distinct from LED_ERROR_NO_LED so the two are
+# never confused: "no LED" is a human verdict about the footage, this one is a fault that may
+# still clear, so the labeler retries it while the extractor treats it as nothing to measure.
+LED_ERROR_UNREADABLE = "Error: video could not be decoded"
 
 
 def save_LED_error(path, message):
