@@ -24,7 +24,7 @@ CONDA_ENV_NAME="sync_pipeline"                        # TODO
 REPO_DIR="/home/picek/repos/MultimodalBrainFeaturePipeline/data_synchronization"     # TODO: .../MultimodalBrainFeaturePipeline/data_synchronization
 
 VIDEO_FOLDER="/home/picek/nas_mount/projects/upperlimb/__UP2/00_RAW_DATA/UP2004"                     # TODO: same videos as the get_LED_signal job
-LED_SIGNALS_FOLDER="/work/upcourtine/multimodal/data/UP2004/led_positions"   # TODO: = OUTPUT_FOLDER from the get_LED_signal job
+LED_SIGNALS_FOLDER="/work/upcourtine/multimodal/data/UP2004/led_signals"   # TODO: = OUTPUT_FOLDER from the get_LED_signal job
 ECOG_FOLDER="/home/picek/nas_mount/projects/upperlimb/__UP2/2_MERGED_TMP_ARCHIVE/01_SMR2NWB_PROCESSED/UP2004"                   # TODO
 LOG_TABLE_PATH="/work/upcourtine/multimodal/data/UP2004/sync.csv"             # TODO
 SYNC_IMAGES_PATH="/work/upcourtine/multimodal/data/UP2004/sync_output"    # TODO
