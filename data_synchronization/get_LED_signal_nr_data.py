@@ -249,7 +249,6 @@ def extract_session(session, dry_run=False, force=False):
             LedSignalDataLayout.DATA_FOLDER_NAME,
             run_folder,
             pl.concat(traces).sort("timestamp") if traces else empty_trace_frame(),
-            complete_run=False,
         )
 
     print(f"  Wrote {measured} trace(s) to {run_folder.path}")
